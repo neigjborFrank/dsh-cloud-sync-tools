@@ -133,6 +133,8 @@ export async function commitVersion(workspaceDir, indexDir, options = {}) {
 				conflicts.push({ path: key, kept: "cloud", incoming: path.relative(indexDir, dest) });
 			} catch {}
 		} else {
+			// 内容未变：镜像模式也要把条目写入新清单（否则第二次上传会清空清单）
+			nextFiles[key] = info;
 			toWrite.push([rel, key, info]);
 		}
 	}
