@@ -218,7 +218,6 @@ window.__ModuleLoader__.load({
 						.map((p, index) => {
 							const cloud = p.cloudProject;
 							const badge = cloud ? `云端 ${cloud.files} 文件 / ${cloud.sessionCount} 会话` : "云端未上传";
-							const ver = cloud && cloud.backups > 0 ? `<button class="dsh-csp-mini" data-projver="${escapeHtml(cloud.name)}" data-repoid="${escapeHtml(cloud.repoId || "")}">版本</button>` : "";
 							return (
 								`<div class="dsh-csp-proj"><span class="n">` +
 								`<b>${escapeHtml(p.title || p.name || "(无工作区)")}</b>` +
@@ -450,56 +449,6 @@ window.__ModuleLoader__.load({
 						}
 					});
 				};
-				// ---------- 版本 ----------
-				const showVersions = async (projectName, mode, repoId) => {
-					try {
-						const data = await call(`/api/versions?project=${encodeURIComponent(projectName)}${repoId ? `&repoId=${encodeURIComponent(repoId)}` : ""}`);
-						const list = data.versions || [];
-						const rows = list
-							.map(
-								(v) =>
-									`<div class="dsh-csp-sess"><span class="n"><b>${escapeHtml(v.version)}</b>` +
-									`<span>${v.files} 个文件 · 差异保存 ${v.stored} 个</span></span>` +
-									`<button class="dsh-csp-mini" data-rb="${escapeHtml(v.version)}">回滚</button></div>`,
-							)
-							.join("");
-						picker.innerHTML =
-							`<div class="dsh-csp-head"><span>云端版本</span><button class="dsh-csp-mini" data-back="1">返回</button></div>` +
-							`<div class="dsh-csp-list">${rows || '<div class="dsh-csp-sess">暂无历史版本</div>'}</div>`;
-						const back = picker.querySelector("[data-back]");
-						if (back) back.onclick = () => currentProject && renderSessions(currentProject, mode);
-						picker.querySelectorAll("[data-rb]").forEach((btn) => {
-							btn.onclick = () => doRollback(projectName, btn.dataset.rb, mode, repoId);
-						});
-						place();
-					} catch (error) {
-						setNote("读取版本失败：" + (error.message || error), true);
-					}
-				};
-
-				const doRollback = (projectName, version, mode, repoId) => {
-					picker.innerHTML =
-						`<div class="dsh-csp-confirm">把云端正式版回滚到 ${escapeHtml(version)}？<br>当前正式版会另存为一份备份。</div>` +
-						`<div class="dsh-csp-foot"><button data-cancel="1">取消</button><button class="go" data-ok="1">确认回滚</button></div>`;
-					picker.querySelector("[data-cancel]").onclick = () => currentProject && renderSessions(currentProject, mode);
-					picker.querySelector("[data-ok]").onclick = () =>
-						void busyRun(async () => {
-							try {
-								const r = await call("/api/rollback-version", {
-									method: "POST",
-									headers: { "Content-Type": "application/json" },
-									body: JSON.stringify({ project: projectName, version, repoId }),
-								});
-								setNote(String(r.output || "").split("\n").slice(0, 3).join("\n"), !r.ok);
-								treeCache = await call("/api/tree");
-								if (currentProject) renderSessions(currentProject, mode);
-							} catch (error) {
-								setNote("回滚失败：" + (error.message || error), true);
-							}
-						});
-					place();
-				};
-
 				// ---------- 仓库管理 ----------
 				const showRepos = async () => {
 					picker.hidden = false;

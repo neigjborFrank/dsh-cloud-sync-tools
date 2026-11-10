@@ -31,9 +31,7 @@ import {
 	downloadProjectWorkspace,
 	findCloudProject,
 	listCloudProjects,
-	listWorkspaceVersions,
 	projectName,
-	rollbackWorkspace,
 	uploadProjectWorkspace,
 } from "./lib/projects.js";
 import { buildManifest } from "./lib/store.js";
@@ -273,7 +271,7 @@ async function buildRepoView(repo) {
 		const projectDir = cloudProject ? path.join(repoRoot, "projects", name) : null;
 
 		// ---- 工作区同步状态 ----
-		let workspace = { status: "not-uploaded", changed: 0, added: 0, removed: 0, files: 0, bytes: 0, large: 0, backups: 0 };
+		let workspace = { status: "not-uploaded", changed: 0, added: 0, removed: 0, files: 0, bytes: 0, large: 0 };
 		if (cloudProject) {
 			const meta = (() => {
 				try {
@@ -298,7 +296,6 @@ async function buildRepoView(repo) {
 				files: Object.keys(cloudFiles).length,
 				bytes: Object.values(cloudFiles).reduce((sum, file) => sum + (file.size || 0), 0),
 				large: cloudProject.large || 0,
-				backups: cloudProject.backups || 0,
 				uploadedAt: meta.updatedAt || null,
 			};
 			if (!cwd || !existsSync(cwd)) {
@@ -832,7 +829,7 @@ export function apply(ctx, config = {}) {
 								await ensureLfs(repoPath);
 								await git(repoPath, ["lfs", "pull"], 300000);
 							}
-							wsResult = await downloadProjectWorkspace(repoPath, cloudProject.name, target, body.version || null);
+							wsResult = await downloadProjectWorkspace(repoPath, cloudProject.name, target);
 							lines.push(`工作区 → ${target}：写入 ${wsResult.written}（大文件恢复 ${wsResult.largeRestored}），校验通过 ${wsResult.verified}，失败 ${wsResult.failed}，移入回收 ${wsResult.trashed}`);
 						} else {
 							lines.push("仅下载会话（不下载工作区）");
@@ -867,42 +864,6 @@ export function apply(ctx, config = {}) {
 						registration,
 					});
 				}
-				if (pathname === "/api/versions") {
-					const project = url.searchParams.get("project") || url.searchParams.get("id") || "";
-					const repo = pickRepo(url.searchParams.get("repoId"));
-					if (!repo || !repo.ok) return sendJson(response, { project, versions: [] });
-					return sendJson(response, { project, repoId: repo.id, repoName: repo.name, versions: listWorkspaceVersions(repo.path, project) });
-				}
-
-				if (pathname === "/api/rollback-version" && request.method === "POST") {
-					const body = await readBody(request);
-					const id = typeof body.project === "string" ? body.project : typeof body.id === "string" ? body.id : "";
-					const version = typeof body.version === "string" ? body.version : "";
-					if (!id || !version) return sendJson(response, { ok: false, output: "缺少 project 或 version" }, 400);
-
-					try {
-						const rollbackRepo = pickRepo(body.repoId);
-						if (!rollbackRepo || !rollbackRepo.ok) return sendJson(response, { ok: false, output: "未选择有效仓库" }, 400);
-						const result = await rollbackWorkspace(rollbackRepo.path, id, version);
-						let output = `已回滚工作区 ${id} → ${version}\n旧正式版另存为：${result.previousSavedAs}`;
-						await ensureGitIdentity(rollbackRepo.path);
-						await ensureLongPaths(rollbackRepo.path);
-						await git(rollbackRepo.path, ["add", "-A"]);
-						const status = await git(activeRepoPath(workspace), ["status", "--porcelain"]);
-						if (status.out.trim()) {
-							const msg = body.message || `archive: 回滚工作区 ${id} 到 ${version}`;
-							const commit = await git(rollbackRepo.path, ["commit", "-m", msg]);
-							if (commit.code !== 0) return sendJson(response, { ok: false, output: output + "\n提交失败：" + commit.err.trim() });
-							output += `\n已提交：${msg}`;
-						}
-						const push = await git(rollbackRepo.path, ["push", "-u", "origin", "main"], 180000);
-						output += "\n" + (push.out || push.err || "已推送").trim();
-						return sendJson(response, { ok: push.code === 0, output, result });
-					} catch (error) {
-						return sendJson(response, { ok: false, output: String(error && error.message ? error.message : error) });
-					}
-				}
-
 				if (pathname === "/api/upload-sessions" && request.method === "POST") {
 					if (!defaultRepo()) return rejectNoRepo();
 					const body = await readBody(request);

@@ -3,13 +3,15 @@
 // projects/
 //   <名称>__<路径键>/
 //     meta.json              { name, cwd, projectKey, title, sessions[], createdAt, updatedAt }
-//     workspace/             工作区镜像（files/、manifest.json、large.json、backups/）
+//     workspace/             工作区镜像（files/、manifest.json、large.json）
 //     sessions/<会话id>/     会话文件（session.v4.jsonl.zstd + meta.json）
+//
+// 版本历史由 git 提交承担：每次上传产生一次 commit，恢复旧版本用 GitHub / git。
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { commitVersion, listBackups, rollback as rollbackEntity } from "./store.js";
+import { commitVersion } from "./store.js";
 
 export const PROJECTS_DIR = "projects";
 
@@ -131,8 +133,7 @@ export function listCloudProjects(repoRoot) {
 			files: Object.keys(manifest.files || {}).length,
 			bytes: Object.values(manifest.files || {}).reduce((s, f) => s + (f.size || 0), 0),
 			large: (large.large || []).length,
-		largeStored: (large.large || []).filter((x) => x.stored === "lfs").length,
-			backups: listBackups(wsDir).length,
+			largeStored: (large.large || []).filter((x) => x.stored === "lfs").length,
 			sessionCount,
 		};
 	});
@@ -163,18 +164,14 @@ export async function uploadProjectWorkspace(repoRoot, cwd, options = {}) {
 }
 
 /** 下载项目工作区：镜像到目标目录，多余文件进 .csp-trash-<ts>/。 */
-export async function downloadProjectWorkspace(repoRoot, target, destDir, version = null) {
+export async function downloadProjectWorkspace(repoRoot, target, destDir) {
 	const project = findCloudProject(repoRoot, target);
 	if (!project) throw new Error(`云端没有项目 ${target}`);
 	const dir = path.join(projectDir(repoRoot, project.name), "workspace");
-	if (!fs.existsSync(path.join(dir, "manifest.json"))) throw new Error("该项目没有上传工作区");
-
-	const manifestPath = version ? path.join(dir, "backups", version, "manifest.json") : path.join(dir, "manifest.json");
-	const manifest = readJson(manifestPath);
-	if (!manifest) throw new Error(`找不到清单：${manifestPath}`);
+	const manifest = readJson(path.join(dir, "manifest.json"));
+	if (!manifest) throw new Error("该项目没有上传工作区");
 
 	const filesDir = path.join(dir, "files");
-	const backupFiles = version ? path.join(dir, "backups", version, "files") : null;
 	const wanted = new Set(Object.keys(manifest.files || {}));
 
 	const { createHash } = await import("node:crypto");
@@ -223,7 +220,7 @@ export async function downloadProjectWorkspace(repoRoot, target, destDir, versio
 	await walkExtras(destDir, "");
 
 	for (const [rel, info] of Object.entries(manifest.files || {})) {
-		const src = info.from === "backup" && backupFiles ? path.join(backupFiles, rel) : path.join(filesDir, rel);
+		const src = path.join(filesDir, rel);
 		const dest = path.join(destDir, rel);
 		try {
 			await fsp.mkdir(path.dirname(dest), { recursive: true });
@@ -236,7 +233,7 @@ export async function downloadProjectWorkspace(repoRoot, target, destDir, versio
 		}
 	}
 
-	const largeJson = version ? readJson(path.join(dir, "backups", version, "large.json")) : readJson(path.join(dir, "large.json"));
+	const largeJson = readJson(path.join(dir, "large.json"));
 	const pendingLarge = [];
 	let largeRestored = 0;
 	const isLfsPointer = (file) => {
@@ -287,19 +284,4 @@ export async function downloadProjectWorkspace(repoRoot, target, destDir, versio
 		pendingLarge,
 		tooLong: (largeJson && largeJson.tooLong) || [],
 	};
-}
-
-export function listWorkspaceVersions(repoRoot, target) {
-	const project = findCloudProject(repoRoot, target);
-	if (!project) return [];
-	const ws = path.join(projectDir(repoRoot, project.name), "workspace");
-	return listBackups(ws).map((v) => ({ ...v, project: project.name }));
-}
-
-export async function rollbackWorkspace(repoRoot, target, version) {
-	const project = findCloudProject(repoRoot, target);
-	if (!project) throw new Error("云端找不到该项目");
-	const ws = path.join(projectDir(repoRoot, project.name), "workspace");
-	const result = await rollbackEntity(ws, version);
-	return { project: project.name, ...result };
 }

@@ -147,30 +147,19 @@ const helloV1 = fs.readFileSync(path.join(workspaceCwd, "notes", "2025", "hello-
 const localInv = await storeMod.buildManifest(workspaceCwd);
 check("S1.5 云端清单文件数与本地一致", Object.keys(readJson(path.join(projDir, "workspace", "manifest.json")).files).length === Object.keys(localInv.files).length, `云端 ${Object.keys(readJson(path.join(projDir, "workspace", "manifest.json")).files).length} / 本地 ${Object.keys(localInv.files).length}（大文件 ${(localInv.large || []).length}）`);
 
-// ================= S2 增量上传 =================
+// ================= S2 增量上传与删除（历史由 git 承担，无插件备份） =================
 fs.writeFileSync(path.join(workspaceCwd, "docs-readme.md"), "# 新增文件\n", "utf8");
 fs.mkdirSync(path.join(workspaceCwd, "tmp"), { recursive: true });
 fs.writeFileSync(path.join(workspaceCwd, "tmp", "delete-me.txt"), "will be deleted\n", "utf8");
 fs.appendFileSync(path.join(workspaceCwd, "notes", "2025", "hello-dsh.md"), "\n\n追加一行（测试增量）\n", "utf8");
 r = await upload(sessionIds);
-const backupsDir = path.join(projDir, "workspace", "backups");
-const backupNames = fs.existsSync(backupsDir) ? fs.readdirSync(backupsDir) : [];
-check("S2.1 增量上传产生备份", backupNames.length === 1, `版本 ${backupNames[0]}`);
-const backupManifest = backupNames.length ? readJson(path.join(backupsDir, backupNames[0], "manifest.json")) : { files: {} };
-const currentManifest = readJson(path.join(projDir, "workspace", "manifest.json"));
-const changedCount = Object.entries(currentManifest.files).filter(([rel, info]) => backupManifest.files[rel] && backupManifest.files[rel].hash !== info.hash).length;
-const storedCount = Object.values(backupManifest.files || {}).filter((f) => f.from === "backup").length;
-check("S2.2 备份只存变化文件", storedCount === changedCount && storedCount >= 1, `stored=${storedCount} changed=${changedCount}`);
-check("S2.3 正式版包含新增文件", Boolean(currentManifest.files["docs-readme.md"] && currentManifest.files["tmp/delete-me.txt"]));
-
-// ================= S3 删除文件 =================
+check("S2.1 增量上传成功", r.ok === true);
+const cur2 = readJson(path.join(projDir, "workspace", "manifest.json"));
+check("S2.2 正式版包含新增文件", Boolean(cur2.files["docs-readme.md"] && cur2.files["tmp/delete-me.txt"]));
+check("S2.3 不再创建插件备份目录", !fs.existsSync(path.join(projDir, "workspace", "backups")));
 fs.rmSync(path.join(workspaceCwd, "tmp", "delete-me.txt"));
 r = await upload(sessionIds);
-const newestBackup = fs.readdirSync(backupsDir).sort().at(-1);
-const back = readJson(path.join(backupsDir, newestBackup, "manifest.json"));
-check("S3.1 被删文件内容进备份", Boolean(back.files["tmp/delete-me.txt"]) && fs.existsSync(path.join(backupsDir, newestBackup, "files", "tmp", "delete-me.txt")));
-check("S3.2 正式版移除被删文件", !readJson(path.join(projDir, "workspace", "manifest.json")).files["tmp/delete-me.txt"]);
-check("S3.3 版本数量 ≤ 3", fs.readdirSync(backupsDir).length <= 3, `当前 ${fs.readdirSync(backupsDir).length}`);
+check("S2.4 删除的文件从正式版移除", !readJson(path.join(projDir, "workspace", "manifest.json")).files["tmp/delete-me.txt"]);
 
 // ================= S4 大文件（LFS） =================
 const bigPath = path.join(workspaceCwd, "big-test.bin");
@@ -228,17 +217,6 @@ check("S8.2 会话恢复到原 cwd", fs.existsSync(restoredOriginal) && readHead
 // ================= S9 位置选择接口（mock 原生选择框） =================
 const picked = await post("/api/pick-directory", {});
 check("S9.1 原生选择框接口可用", picked.ok === true && picked.path === path.join(base, "picked-by-dialog") && serviceCalls.pick > 0);
-
-// ================= S10 版本回滚 =================
-const versions = (await call(`/api/versions?project=${encodeURIComponent(path.basename(projDir))}`)).versions || [];
-check("S10.1 能列出历史版本", versions.length >= 1, JSON.stringify(versions.map((v) => v.version)));
-if (versions.length) {
-	const oldest = versions[versions.length - 1].version;
-	r = await post("/api/rollback-version", { project: path.basename(projDir), version: oldest });
-	const afterRollback = fs.readFileSync(path.join(projDir, "workspace", "files", "notes", "2025", "hello-dsh.md"), "utf8");
-	check("S10.2 回滚成功且注册表正常", r.ok === true && regStatus().ok === true);
-	check("S10.3 回滚后内容回到旧版本", afterRollback === helloV1, `回滚后 ${afterRollback.length} / v1 ${helloV1.length}`);
-}
 
 // ================= S11 删除大文件 =================
 fs.rmSync(bigPath, { force: true });
