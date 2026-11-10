@@ -18,6 +18,7 @@ import {
 	layoutDir,
 	projectDir,
 	projectKeyOf,
+	indexProjectsRoot,
 	saveProjectMeta,
 	sessionsDir,
 } from "./projects.js";
@@ -281,7 +282,7 @@ export async function uploadSession({ repoRoot, id, cwd: expectedCwd, projectNam
 /** 列出云端已有会话。 */
 export function listCloudSessions(repoRoot) {
 	const out = [];
-	const projectsRoot = path.join(repoRoot, "projects");
+	const projectsRoot = fs.existsSync(indexProjectsRoot(repoRoot)) ? indexProjectsRoot(repoRoot) : path.join(repoRoot, "projects");
 	let projects = [];
 	try {
 		projects = fs.readdirSync(projectsRoot, { withFileTypes: true }).filter((e) => e.isDirectory());

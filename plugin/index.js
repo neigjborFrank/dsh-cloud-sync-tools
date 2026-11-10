@@ -293,7 +293,9 @@ async function buildRepoView(repo) {
 			})();
 			const manifest = (() => {
 				try {
-					return JSON.parse(fs.readFileSync(path.join(projectDir, "workspace", "manifest.json"), "utf8"));
+					const base = path.join(projectDir, "manifest.json");
+					const legacy = path.join(projectDir, "workspace", "manifest.json");
+					return JSON.parse(fs.readFileSync(fs.existsSync(base) ? base : legacy, "utf8"));
 				} catch {
 					return { files: {} };
 				}

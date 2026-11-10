@@ -52,9 +52,23 @@ export function projectsRoot(repoRoot) {
 	return path.join(repoRoot, PROJECTS_DIR);
 }
 
+/** 指示区：只存清单、会话与映射关系。 */
+export function indexProjectsRoot(repoRoot) {
+	return path.join(repoRoot, "index", "projects");
+}
+
+/** 存储区：工作区文件内容（按最大工作区一棵树）。 */
+export function storeFilesDir(repoRoot, projectNameValue) {
+	return path.join(repoRoot, "store", projectNameValue, "files");
+}
+
+export function storeLargeDir(repoRoot, projectNameValue) {
+	return path.join(repoRoot, "store", projectNameValue, "large");
+}
+
 export function projectDir(repoRoot, target) {
-	if (/[\\/]/.test(target) || /^[A-Za-z]:/.test(target)) return path.join(projectsRoot(repoRoot), projectName(target));
-	return path.join(projectsRoot(repoRoot), target);
+	if (/[\\/]/.test(target) || /^[A-Za-z]:/.test(target)) return path.join(indexProjectsRoot(repoRoot), projectName(target));
+	return path.join(indexProjectsRoot(repoRoot), target);
 }
 
 /** 兼容旧布局：项目数据可能在 <项目>/ 或 <项目>/workspace/ 下。 */
@@ -143,7 +157,8 @@ export function saveProjectMeta(repoRoot, meta) {
 
 /** 列出云端所有项目（含 aliases：被合并进来的子目录工作区）。 */
 export function listCloudProjects(repoRoot) {
-	const root = projectsRoot(repoRoot);
+	let root = indexProjectsRoot(repoRoot);
+	if (!fs.existsSync(root)) root = projectsRoot(repoRoot);
 	let dirs = [];
 	try {
 		dirs = fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory());
@@ -249,7 +264,13 @@ export async function uploadProjectWorkspace(repoRoot, cwd, options = {}) {
 	// 1) 当前工作区是某个云端项目的子目录 → 合并到父项目对应子路径
 	if (analysis.type === "incoming-inside-cloud") {
 		const parentDir = layoutDir(projectDir(repoRoot, analysis.project.name));
-		const result = await commitVersion(cwd, parentDir, { scopePrefix: analysis.scope, storeLarge: options.storeLarge });
+		const parentStore = fs.existsSync(path.join(repoRoot, "store", analysis.project.name)) ? storeFilesDir(repoRoot, analysis.project.name) : path.join(parentDir, "files");
+		const result = await commitVersion(cwd, parentDir, {
+			scopePrefix: analysis.scope,
+			storeLarge: options.storeLarge,
+			filesRoot: parentStore,
+			largeRoot: fs.existsSync(path.join(repoRoot, "store", analysis.project.name)) ? storeLargeDir(repoRoot, analysis.project.name) : path.join(parentDir, "large"),
+		});
 		const meta = ensureProject(repoRoot, analysis.project.cwd);
 		meta.aliases = mergeAlias(meta.aliases, { cwd, scope: analysis.scope });
 		meta.workspace = { files: result.files, changed: result.changed, added: result.added, removed: result.removed };
@@ -261,8 +282,12 @@ export async function uploadProjectWorkspace(repoRoot, cwd, options = {}) {
 	if (analysis.type === "cloud-inside-incoming") {
 		const meta = ensureProject(repoRoot, cwd);
 		const parentDir = layoutDir(projectDir(repoRoot, meta.name));
-		const migration = await migrateInto(repoRoot, analysis.project, meta, analysis.prefix, parentDir);
-		const result = await commitVersion(cwd, parentDir, { storeLarge: options.storeLarge, mode: "union" });
+		const parentStore = storeFilesDir(repoRoot, meta.name);
+		const parentLarge = storeLargeDir(repoRoot, meta.name);
+		fs.mkdirSync(parentStore, { recursive: true });
+		fs.mkdirSync(parentLarge, { recursive: true });
+		const migration = await migrateInto(repoRoot, analysis.project, meta, analysis.prefix, parentDir, parentStore, parentLarge);
+		const result = await commitVersion(cwd, parentDir, { storeLarge: options.storeLarge, mode: "union", filesRoot: parentStore, largeRoot: parentLarge });
 		meta.aliases = mergeAlias(meta.aliases, { cwd: analysis.project.cwd, scope: analysis.prefix });
 		for (const alias of migration.aliases || []) meta.aliases = mergeAlias(meta.aliases, alias);
 		meta.sessions = [...new Set([...(meta.sessions || []), ...migration.sessions])];
@@ -276,17 +301,23 @@ export async function uploadProjectWorkspace(repoRoot, cwd, options = {}) {
 
 	// 3) 同一项目或全新项目
 	const meta = ensureProject(repoRoot, cwd);
-	const dir = layoutDir(projectDir(repoRoot, meta.name));
-	const result = await commitVersion(cwd, dir, { storeLarge: options.storeLarge });
+	const dir = projectDir(repoRoot, meta.name);
+	const filesRoot = storeFilesDir(repoRoot, meta.name);
+	const largeRoot = storeLargeDir(repoRoot, meta.name);
+	fs.mkdirSync(filesRoot, { recursive: true });
+	fs.mkdirSync(largeRoot, { recursive: true });
+	const result = await commitVersion(cwd, dir, { storeLarge: options.storeLarge, filesRoot, largeRoot });
 	meta.workspace = { files: result.files, changed: result.changed, added: result.added, removed: result.removed };
 	saveProjectMeta(repoRoot, meta);
 	return { meta, projectName: meta.name, scope: "", analysisType: analysis.type, ...result };
 }
 
 /** 把一个较小子项目迁移进父项目（文件加 prefix，会话一起搬），返回统计。 */
-async function migrateInto(repoRoot, childProject, parentMeta, prefix, parentDir) {
+async function migrateInto(repoRoot, childProject, parentMeta, prefix, parentDir, parentStore, parentLarge) {
 	const childDir = projectDir(repoRoot, childProject.name);
 	const childLayout = layoutDir(childDir);
+	const childStore = fs.existsSync(path.join(repoRoot, "store", childProject.name)) ? storeFilesDir(repoRoot, childProject.name) : path.join(childLayout, "files");
+	const childLarge = fs.existsSync(path.join(repoRoot, "store", childProject.name)) ? storeLargeDir(repoRoot, childProject.name) : path.join(childLayout, "large");
 	const childManifest = readJson(path.join(childLayout, "manifest.json")) || { files: {}, large: [], tooLong: [] };
 	const parentManifest = readJson(path.join(parentDir, "manifest.json")) || { files: {}, large: [], tooLong: [] };
 	const p = String(prefix || "").replace(/^\/+|\/+$/g, "");
@@ -305,11 +336,11 @@ async function migrateInto(repoRoot, childProject, parentMeta, prefix, parentDir
 	const nextFiles = { ...(parentManifest.files || {}) };
 	let migrated = 0;
 	let conflicts = 0;
-	fs.mkdirSync(path.join(parentDir, "files"), { recursive: true });
+	fs.mkdirSync(parentStore, { recursive: true });
 	for (const [rel, info] of Object.entries(childManifest.files || {})) {
 		const key = mapped(rel);
 		const before = nextFiles[key];
-		const src = path.join(childLayout, "files", rel);
+		const src = path.join(childStore, rel);
 		if (before && before.hash === info.hash) continue;
 		if (before && before.hash !== info.hash) {
 			const dest = path.join(parentDir, "conflicts", stamp, key);
@@ -321,7 +352,7 @@ async function migrateInto(repoRoot, childProject, parentMeta, prefix, parentDir
 			continue;
 		}
 		try {
-			const dest = path.join(parentDir, "files", key);
+			const dest = path.join(parentStore, key);
 			fs.mkdirSync(path.dirname(dest), { recursive: true });
 			await fsp.copyFile(src, dest);
 			nextFiles[key] = info;
@@ -333,8 +364,8 @@ async function migrateInto(repoRoot, childProject, parentMeta, prefix, parentDir
 	for (const entry of childManifest.large || []) {
 		const key = mapped(entry.path);
 		try {
-			const src = path.join(childLayout, "large", entry.path);
-			const dest = path.join(parentDir, "large", key);
+			const src = path.join(childLarge, entry.path);
+			const dest = path.join(parentLarge, key);
 			fs.mkdirSync(path.dirname(dest), { recursive: true });
 			await fsp.copyFile(src, dest);
 			nextLarge.push({ ...entry, path: key });
@@ -386,7 +417,8 @@ export async function downloadProjectWorkspace(repoRoot, target, destDir) {
 	const manifest = readJson(path.join(dir, "manifest.json"));
 	if (!manifest) throw new Error("该项目没有上传工作区");
 
-	const filesDir = path.join(dir, "files");
+	const filesDir = fs.existsSync(path.join(repoRoot, "store", project.name)) ? storeFilesDir(repoRoot, project.name) : path.join(dir, "files");
+	const largeDir = fs.existsSync(path.join(repoRoot, "store", project.name)) ? storeLargeDir(repoRoot, project.name) : path.join(dir, "large");
 	const wanted = new Set(Object.keys(manifest.files || {}));
 
 	await fsp.mkdir(destDir, { recursive: true });
@@ -453,7 +485,7 @@ export async function downloadProjectWorkspace(repoRoot, target, destDir) {
 		}
 	};
 	for (const entry of (largeJson && largeJson.large) || []) {
-		const src = path.join(dir, "large", entry.path);
+		const src = path.join(largeDir, entry.path);
 		const dest = path.join(destDir, entry.path);
 		if (!fs.existsSync(src)) {
 			pendingLarge.push({ ...entry, reason: "云端缺少大文件内容" });

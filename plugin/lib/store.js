@@ -95,15 +95,16 @@ function underScope(key, scope) {
  * options.storeLarge：是否把大文件内容写入 large/（git-lfs）。
  * 同路径不同内容：保留云端旧版，新内容写入 conflicts/<ts>/<路径>，并在返回值里列出。
  */
-export async function commitVersion(workspaceDir, projectDir, options = {}) {
+export async function commitVersion(workspaceDir, indexDir, options = {}) {
 	const scope = normalizeScope(options.scopePrefix);
 	const mode = options.mode === "union" ? "union" : "mirror";
-	const filesDir = path.join(projectDir, "files");
-	const manifestPath = path.join(projectDir, "manifest.json");
+	const filesDir = options.filesRoot || path.join(indexDir, "files");
+	const largeDir = options.largeRoot || path.join(indexDir, "large");
+	const manifestPath = path.join(indexDir, "manifest.json");
 	const current = readJson(manifestPath) || { files: {}, large: [], tooLong: [] };
 	const incoming = await buildManifest(workspaceDir);
 	const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
-	const conflictsDir = path.join(projectDir, "conflicts", stamp);
+	const conflictsDir = path.join(indexDir, "conflicts", stamp);
 	const conflicts = [];
 
 	const nextFiles = mode === "mirror" && scope === "" ? {} : { ...(current.files || {}) };
@@ -129,7 +130,7 @@ export async function commitVersion(workspaceDir, projectDir, options = {}) {
 			try {
 				fs.mkdirSync(path.dirname(dest), { recursive: true });
 				await fsp.copyFile(path.join(workspaceDir, rel), dest);
-				conflicts.push({ path: key, kept: "cloud", incoming: path.relative(projectDir, dest) });
+				conflicts.push({ path: key, kept: "cloud", incoming: path.relative(indexDir, dest) });
 			} catch {}
 		} else {
 			toWrite.push([rel, key, info]);
@@ -175,7 +176,7 @@ export async function commitVersion(workspaceDir, projectDir, options = {}) {
 	if (!(mode === "union" && scope === "")) await walkDel(filesDir, "");
 
 	// 大文件（按作用域合并清单）
-	const largeDir = path.join(projectDir, "large");
+
 	const currentLarge = (current.large || []).filter((entry) => !scope || !underScope(entry.path, scope));
 	const largeEntries = [...currentLarge];
 	for (const entry of incoming.large || []) {
@@ -216,7 +217,7 @@ export async function commitVersion(workspaceDir, projectDir, options = {}) {
 		...(incoming.tooLong || []).map((entry) => ({ ...entry, path: scoped(scope, entry.path) })),
 	];
 	writeJson(manifestPath, { createdAt: new Date().toISOString(), files: nextFiles, large: largeEntries, tooLong: nextTooLong });
-	writeJson(path.join(projectDir, "large.json"), { createdAt: new Date().toISOString(), large: largeEntries, tooLong: nextTooLong });
+	writeJson(path.join(indexDir, "large.json"), { createdAt: new Date().toISOString(), large: largeEntries, tooLong: nextTooLong });
 
 	return {
 		changed,

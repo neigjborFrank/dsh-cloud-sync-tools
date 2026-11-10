@@ -82,7 +82,8 @@ const token = (await fetch(baseUrl + "/token").then((r) => r.json())).token;
 const call = (p, init) => fetch(`${baseUrl}${p}${p.includes("?") ? "&" : "?"}token=${token}`, init).then((r) => r.json());
 const post = (p, body) => call(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 const readJson = (f) => JSON.parse(fs.readFileSync(f, "utf8"));
-const projectsRoot = path.join(repo, "projects");
+const projectsRoot = path.join(repo, "index", "projects");
+const storeRoot = path.join(repo, "store");
 
 // 注册仓库（显式，本机路径）
 const reg = await post("/api/repos", { path: repo, name: "主仓库" });
@@ -92,7 +93,7 @@ const repoId = reg.repos[0].id;
 let r = await post("/api/upload-project", { cwd: proj, sessionIds: [sidProj], repoId });
 const projName = fs.readdirSync(projectsRoot)[0];
 check("S1 首次上传建立项目", r.ok === true && fs.existsSync(path.join(projectsRoot, projName, "manifest.json")), projName);
-check("S1b 文件保持原始目录结构", fs.existsSync(path.join(projectsRoot, projName, "files", "sub", "b.txt")));
+check("S1b 文件保存到存储区且保持原始目录结构", fs.existsSync(path.join(storeRoot, projName, "files", "sub", "b.txt")));
 
 // 2) 上传子目录工作区会话 → 应合并进父项目
 r = await post("/api/upload-project", { cwd: sub, sessionIds: [sidSub], repoId });
@@ -111,7 +112,7 @@ console.log("S3 upload output:", JSON.stringify(r.output || r.error || null));
 console.log("S3 projects:", JSON.stringify(fs.readdirSync(projectsRoot)));
 const treeName = fs.readdirSync(projectsRoot)[0];
 check("S3 父工作区合并后只保留一个项目", fs.readdirSync(projectsRoot).length === 1, JSON.stringify(fs.readdirSync(projectsRoot)));
-check("S3b 父项目包含原子项目的文件", fs.existsSync(path.join(projectsRoot, treeName, "files", "proj", "sub", "b.txt")));
+check("S3b 存储区按最大工作区保存（父项目树含原子项目文件）", fs.existsSync(path.join(storeRoot, treeName, "files", "proj", "sub", "b.txt")));
 check("S3c 冲突文件被隔离", fs.existsSync(path.join(projectsRoot, treeName, "conflicts")));
 check("S3d 旧子项目会话被迁移", fs.existsSync(path.join(projectsRoot, treeName, "sessions", sidProj, "session.v4.jsonl.zstd")));
 const treeMeta = readJson(path.join(projectsRoot, treeName, "meta.json"));
