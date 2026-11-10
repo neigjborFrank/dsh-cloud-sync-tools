@@ -1,0 +1,8 @@
+node_modules/
+out/
+tmp/
+*.log
+*.bak-*
+.csp-trash-*/
+.DS_Store
+Thumbs.db

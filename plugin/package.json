@@ -1,0 +1,35 @@
+{
+  "name": "dsh-plugin-cloud-sync-panel",
+  "version": "3.0.1",
+  "private": true,
+  "description": "DeepSeek Harness plugin: sidebar footer entry with an in-app floating sync menu; the HTTP API runs inside the DSH host process (no child process, UTF-8 native, starts/stops with DSH). · 侧边栏悬浮同步菜单，服务内置于 DSH 宿主进程。",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "lib/archive.js",
+    "lib/store.js",
+    "lib/projects.js",
+    "lib/registry.js",
+    "lib/repos.js"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  }
+}
