@@ -26,7 +26,7 @@ import {
 	uploadSession,
 } from "./lib/archive.js";
 import { repairRegistry, registerWorkspace, validateRegistry } from "./lib/registry.js";
-import { addRepo, defaultRepo, ensureRegistryFile, findRepo, listRepos, publicRepos, removeRepo, runGit } from "./lib/repos.js";
+import { addRepo, defaultRepo, ensureRegistryFile, findRepo, getBinding, listBindings, listRepos, publicRepos, removeRepo, runGit, setBinding } from "./lib/repos.js";
 import {
 	downloadProjectWorkspace,
 	findCloudProject,
@@ -470,7 +470,14 @@ async function buildCloudView(repos) {
 		}
 	}
 
+	const bindings = listBindings();
 	const projects = [...merged.values()];
+	for (const project of projects) {
+		const boundId = bindings[project.name];
+		if (!boundId) continue;
+		const boundRepo = repoSummaries.find((repo) => repo.id === boundId);
+		if (boundRepo) project.boundRepo = boundRepo.name;
+	}
 	let pendingWorkspaces = 0;
 	let pendingSessions = 0;
 	for (const project of projects) {
@@ -496,6 +503,7 @@ async function buildCloudView(repos) {
 }
 /** 合并本地与多个云端仓库的项目视图：项目 = 工作区 + 会话。 */
 function buildTree(repos) {
+	const bindings = listBindings();
 	const local = listSessions();
 	const cloudSessions = new Map();
 	const cloudProjectMap = new Map();
@@ -505,7 +513,8 @@ function buildTree(repos) {
 			if (!cloudSessions.has(session.id)) cloudSessions.set(session.id, { ...session, repoId: repo.id, repoName: repo.name });
 		}
 		for (const project of listCloudProjects(repo.path)) {
-			if (!cloudProjectMap.has(project.name)) {
+			const boundId = bindings[project.name];
+			if (!cloudProjectMap.has(project.name) || (boundId && boundId === repo.id)) {
 				cloudProjectMap.set(project.name, {
 					...project,
 					repoId: repo.id,
@@ -561,6 +570,7 @@ function buildTree(repos) {
 
 	return {
 		suggestedBase: defaultWorkspaceBase(),
+		bindings,
 		repos: repos.map((repo) => ({ id: repo.id, name: repo.name, ok: repo.ok, url: repo.url })),
 		projects: [...byName.values()],
 	};
@@ -719,7 +729,7 @@ export function apply(ctx, config = {}) {
 						}
 					}
 					ensureRegistryFile();
-					return sendJson(response, { repos: publicRepos(), defaultRepoId: (defaultRepo() || {}).id || null });
+					return sendJson(response, { repos: publicRepos(), bindings: listBindings(), defaultRepoId: (defaultRepo() || {}).id || null });
 				}
 
 				if (pathname === "/api/repos/remove" && request.method === "POST") {
@@ -758,6 +768,7 @@ export function apply(ctx, config = {}) {
 					const lines = [`目标仓库：${targetRepo.name}`];
 					const lfsReady = await ensureLfs(repoPath);
 					const wsResult = await uploadProjectWorkspace(repoPath, cwd, { storeLarge: lfsReady });
+					setBinding(projectName(cwd), targetRepo.id);
 					if (!lfsReady && (wsResult.large ?? 0) > 0) lines.push(`⚠ git-lfs 不可用，${wsResult.large} 个大文件只记录清单`);
 					lines.push(`项目 ${wsResult.meta.name}：文件 ${wsResult.files ?? 0}，变更 ${wsResult.changed ?? 0} / 增 ${wsResult.added ?? 0} / 删 ${wsResult.removed ?? 0}${wsResult.large ? `，大文件 ${wsResult.large}` : ""}`);
 
@@ -810,7 +821,14 @@ export function apply(ctx, config = {}) {
 					const name = typeof body.name === "string" && body.name ? body.name : typeof body.key === "string" ? body.key : "";
 					const ids = Array.isArray(body.sessionIds) ? [...new Set(body.sessionIds)] : [];
 					const withWorkspace = body.withWorkspace !== false;
-					const targetRepo = pickRepo(body.repoId);
+					let targetRepo = pickRepo(body.repoId);
+					if (!targetRepo || !targetRepo.ok) {
+						const boundId = getBinding(name);
+						if (boundId) targetRepo = findRepo(boundId);
+					}
+					if (!targetRepo || !targetRepo.ok) {
+						targetRepo = listRepos().find((repo) => repo.ok && findCloudProject(repo.path, name)) || null;
+					}
 					if (!targetRepo || !targetRepo.ok) return sendJson(response, { ok: false, error: "no-repo", output: "还没有登记同步仓库：请先在「仓库管理…」登记你的私有仓库" }, 400);
 					const repoPath = targetRepo.path;
 					const cloudProject = findCloudProject(repoPath, name);

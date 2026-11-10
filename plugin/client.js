@@ -314,10 +314,12 @@ window.__ModuleLoader__.load({
 					const options = repos
 						.map(
 							(repo, index) =>
-								`<label class="dsh-csp-sess" style="padding-left:8px"><input type="radio" name="csp-repo" value="${escapeHtml(repo.id)}" ${index === 0 ? "checked" : ""}>` +
+								`<label class="dsh-csp-sess" style="padding-left:8px"><input type="radio" name="csp-repo" value="${escapeHtml(repo.id)}" ${(boundId ? repo.id === boundId : index === 0) ? "checked" : ""}>` +
 								`<span class="n"><b>${escapeHtml(repo.name)}</b><span>${escapeHtml(repo.url || repo.path || "")}</span></span></label>`,
 						)
 						.join("");
+					const bindings = (treeCache && treeCache.bindings) || {};
+					const boundId = bindings[project.name] || "";
 					picker.innerHTML =
 						`<div class="dsh-csp-head"><span>上传到哪个仓库？</span></div>` +
 						`<div class="dsh-csp-list">${options}</div>` +
@@ -611,7 +613,7 @@ window.__ModuleLoader__.load({
 								`<div class="dsh-csp-cv-proj" data-proj="${escapeHtml(project.name)}" title="${escapeHtml(project.cwd || "")}">` +
 								`<span class="caret">${open ? "▾" : "▸"}</span>` +
 								`<span class="nm"><b>${escapeHtml(project.title || project.name)}</b>` +
-								`<span class="dsh-csp-cv-repobadge">${escapeHtml((project.repoNames || []).join(" / "))}</span></span>` +
+								`<span class="dsh-csp-cv-repobadge">${escapeHtml((project.repoNames || []).join(" / "))}${project.boundRepo ? " · 绑定 " + escapeHtml(project.boundRepo) : ""}</span></span>` +
 								`<span class="stat">${sessions.length} 会话${pending ? ` · 待同步 ${pending}` : ""}</span>` +
 								`</div>` +
 								kids

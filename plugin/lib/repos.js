@@ -198,6 +198,7 @@ export function removeRepo(id) {
 	registry.repos = registry.repos.filter((repo) => repo.id !== id);
 	if (!registry.repos.length) throw new Error("至少保留一个仓库");
 	if (registry.repos.length === before) throw new Error("找不到该仓库");
+	for (const [name, bound] of Object.entries(registry.bindings || {})) if (bound === id) delete registry.bindings[name];
 	saveRegistry(registry);
 	return registry;
 }
@@ -211,4 +212,37 @@ export function publicRepos() {
 		path: repo.path,
 		ok: repo.ok,
 	}));
+}
+
+
+/** 读取「项目名 → 仓库 id」绑定表。 */
+export function listBindings() {
+	const registry = readRegistry();
+	return (registry && registry.bindings) || {};
+}
+
+export function getBinding(projectName) {
+	return listBindings()[projectName] || "";
+}
+
+export function setBinding(projectName, repoId) {
+	if (!projectName || !repoId) return;
+	const registry = readRegistry() || { version: 1, repos: [] };
+	registry.bindings = registry.bindings || {};
+	registry.bindings[projectName] = repoId;
+	saveRegistry(registry);
+}
+
+/** 移除某仓库时，一并清掉指向它的绑定。 */
+export function clearBindingsForRepo(repoId) {
+	const registry = readRegistry();
+	if (!registry || !registry.bindings) return;
+	let changed = false;
+	for (const [name, id] of Object.entries(registry.bindings)) {
+		if (id === repoId) {
+			delete registry.bindings[name];
+			changed = true;
+		}
+	}
+	if (changed) saveRegistry(registry);
 }

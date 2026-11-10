@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-cloud-sync-panel",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "private": true,
   "description": "DeepSeek Harness plugin: sidebar footer entry with an in-app floating sync menu; the HTTP API runs inside the DSH host process (no child process, UTF-8 native, starts/stops with DSH). · 侧边栏悬浮同步菜单，服务内置于 DSH 宿主进程。",
   "type": "module",
