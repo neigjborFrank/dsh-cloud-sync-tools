@@ -5,6 +5,7 @@
  *   projects/<项目名>/workspace/           工作区（全量镜像 + 备份）
  *   projects/<项目名>/sessions/<会话id>/   会话文件
  */
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
@@ -14,6 +15,7 @@ import zlib from "node:zlib";
 import {
 	ensureProject,
 	findCloudProject,
+	layoutDir,
 	projectDir,
 	projectKeyOf,
 	saveProjectMeta,
@@ -206,7 +208,7 @@ export function findSessionDir(id) {
 }
 
 /** 上传单个会话到所属项目：projects/<项目>/sessions/<id>/。 */
-export async function uploadSession({ repoRoot, id, cwd: expectedCwd }) {
+export async function uploadSession({ repoRoot, id, cwd: expectedCwd, projectName: projectOverride = "", scope = "" }) {
 	// 同一会话可能因“下载到新位置”在本机存在多个副本；指定 cwd 时优先用该项目目录下的副本
 	let sessionDir = null;
 	if (expectedCwd) {
@@ -224,8 +226,10 @@ export async function uploadSession({ repoRoot, id, cwd: expectedCwd }) {
 	const cwd = header.cwd || "";
 	if (!cwd) return { id, ok: false, error: "会话没有工作区路径" };
 
-	const meta = ensureProject(repoRoot, cwd);
-	const destDir = path.join(sessionsDir(repoRoot, meta.name), id);
+	// 合并场景（projectOverride）下不要按 cwd 新建一个空项目
+	const derived = projectOverride ? null : ensureProject(repoRoot, cwd);
+	const targetProject = projectOverride || derived.name;
+	const destDir = path.join(sessionsDir(repoRoot, targetProject), id);
 	await fsp.mkdir(destDir, { recursive: true });
 	await fsp.copyFile(srcFile, path.join(destDir, fileName));
 
@@ -239,7 +243,8 @@ export async function uploadSession({ repoRoot, id, cwd: expectedCwd }) {
 		title: readTitle(id),
 		cwd,
 		projectKey: projectKeyOf(cwd),
-		project: meta.name,
+		project: targetProject,
+		scope: scope || "",
 		sessionFile: fileName,
 		sessionBytes: fs.statSync(srcFile).size,
 		createdAt: header.createdAt || 0,
@@ -249,8 +254,26 @@ export async function uploadSession({ repoRoot, id, cwd: expectedCwd }) {
 	};
 	await fsp.writeFile(sessionMetaPath, JSON.stringify(sessionMeta, null, 2), "utf8");
 
-	meta.sessions = [...new Set([...(meta.sessions || []), id])];
-	saveProjectMeta(repoRoot, meta);
+	// 该会话对应的"工作区结构快照"（只记录引用，不复制文件内容）
+	try {
+		const layout = layoutDir(projectDir(repoRoot, targetProject));
+		const manifestBuf = fs.readFileSync(path.join(layout, "manifest.json"));
+		const manifest = JSON.parse(manifestBuf.toString("utf8"));
+		const ref = {
+			project: targetProject,
+			scope: scope || "",
+			manifestHash: createHash("sha256").update(manifestBuf).digest("hex"),
+			files: Object.keys(manifest.files || {}).length,
+			capturedAt: new Date().toISOString(),
+		};
+		await fsp.writeFile(path.join(destDir, "workspace-ref.json"), JSON.stringify(ref, null, 2), "utf8");
+	} catch {}
+
+	// 会话登记到实际存在的项目（合并时不是 cwd 派生出来的项目）
+	const projectMetaPath = path.join(projectDir(repoRoot, targetProject), "meta.json");
+	const projectMeta = JSON.parse(fs.readFileSync(projectMetaPath, "utf8"));
+	projectMeta.sessions = [...new Set([...(projectMeta.sessions || []), id])];
+	saveProjectMeta(repoRoot, projectMeta);
 
 	return { id, ok: true, dest: path.relative(repoRoot, destDir) };
 }
@@ -441,7 +464,7 @@ export async function listPending(repoRoot) {
 		}
 
 		const project = findCloudProject(repoRoot, session.cwd);
-		const manifestPath = project ? path.join(projectDir(repoRoot, project.name), "workspace", "manifest.json") : null;
+		const manifestPath = project ? path.join(layoutDir(projectDir(repoRoot, project.name)), "manifest.json") : null;
 		if (!manifestPath || !fs.existsSync(manifestPath)) {
 			results.push({ ...base, status: "new" });
 			continue;

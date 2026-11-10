@@ -238,11 +238,22 @@ async function buildRepoView(repo) {
 	const cloudSessions = listCloudSessions(repoRoot);
 	const cloudProjects = listCloudProjects(repoRoot);
 
+	// cwd → 云端项目（含被合并进来的子目录 alias），用于把本机会话归到正确的项目
+	const normCwd = (p) => path.resolve(String(p || "")).replace(/[\\/]+$/, "").toLowerCase();
+	const cloudByCwd = new Map();
+	for (const project of cloudProjects) {
+		if (project.cwd) cloudByCwd.set(normCwd(project.cwd), { project, scope: "" });
+		for (const alias of project.aliases || []) {
+			if (alias.cwd) cloudByCwd.set(normCwd(alias.cwd), { project, scope: alias.scope || "" });
+		}
+	}
+
 	const localByName = new Map();
 	for (const session of localSessions) {
 		if (!session.cwd) continue;
-		const name = projectName(session.cwd);
-		if (!localByName.has(name)) localByName.set(name, { cwd: session.cwd, sessions: [] });
+		const match = cloudByCwd.get(normCwd(session.cwd));
+		const name = match ? match.project.name : projectName(session.cwd);
+		if (!localByName.has(name)) localByName.set(name, { cwd: match ? match.project.cwd : session.cwd, sessions: [] });
 		localByName.get(name).sessions.push(session);
 	}
 
@@ -530,14 +541,25 @@ function buildTree(repos) {
 		}
 	}
 
+	// cwd → 云端项目（含被合并进来的子目录 alias）
+	const normCwd = (p) => path.resolve(String(p || "")).replace(/[\\/]+$/, "").toLowerCase();
+	const cloudByCwd = new Map();
+	for (const project of cloudProjectMap.values()) {
+		if (project.cwd) cloudByCwd.set(normCwd(project.cwd), { project, scope: "" });
+		for (const alias of project.aliases || []) {
+			if (alias.cwd) cloudByCwd.set(normCwd(alias.cwd), { project, scope: alias.scope || "" });
+		}
+	}
+
 	const byName = new Map();
 	const ensure = (cwd) => {
-		const name = cwd ? projectName(cwd) : "_no-cwd";
+		const match = cwd ? cloudByCwd.get(normCwd(cwd)) : null;
+		const name = match ? match.project.name : cwd ? projectName(cwd) : "_no-cwd";
 		if (!byName.has(name)) {
 			byName.set(name, {
 				name,
-				cwd: cwd || "",
-				title: cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() : "(无工作区)",
+				cwd: match ? match.project.cwd : cwd || "",
+				title: match ? match.project.title || name : cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() : "(无工作区)",
 				cloudProject: null,
 				sessions: [],
 			});
@@ -768,13 +790,16 @@ export function apply(ctx, config = {}) {
 					const lines = [`目标仓库：${targetRepo.name}`];
 					const lfsReady = await ensureLfs(repoPath);
 					const wsResult = await uploadProjectWorkspace(repoPath, cwd, { storeLarge: lfsReady });
-					setBinding(projectName(cwd), targetRepo.id);
+					setBinding(wsResult.projectName, targetRepo.id);
+					if (wsResult.mergedInto) lines.push(`检测到子目录工作区：已按父项目视角合并到「${wsResult.mergedInto}」（子路径 ${wsResult.scope || "根"}）`);
+					if (wsResult.migrated) lines.push(`检测到包含关系：已将旧项目「${wsResult.migrated}」并入当前更大的工作区`);
+					if ((wsResult.conflicts || []).length) lines.push(`⚠ ${wsResult.conflicts.length} 个文件同路径但内容不同：云端旧版保留，新内容已存入 conflicts/`);
 					if (!lfsReady && (wsResult.large ?? 0) > 0) lines.push(`⚠ git-lfs 不可用，${wsResult.large} 个大文件只记录清单`);
-					lines.push(`项目 ${wsResult.meta.name}：文件 ${wsResult.files ?? 0}，变更 ${wsResult.changed ?? 0} / 增 ${wsResult.added ?? 0} / 删 ${wsResult.removed ?? 0}${wsResult.large ? `，大文件 ${wsResult.large}` : ""}`);
+					lines.push(`项目 ${wsResult.projectName}：文件 ${wsResult.files ?? 0}，变更 ${wsResult.changed ?? 0} / 增 ${wsResult.added ?? 0} / 删 ${wsResult.removed ?? 0}${wsResult.large ? `，大文件 ${wsResult.large}` : ""}`);
 
 					for (const id of ids) {
 						try {
-							const r = await uploadSession({ repoRoot: repoPath, id, cwd });
+							const r = await uploadSession({ repoRoot: repoPath, id, cwd, projectName: wsResult.projectName, scope: wsResult.scope || "" });
 							lines.push(r.ok ? `✓ 会话 ${id}` : `✗ 会话 ${id}: ${r.error}`);
 						} catch (error) {
 							lines.push(`✗ 会话 ${id}: ${error.message || error}`);

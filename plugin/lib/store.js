@@ -1,17 +1,15 @@
 // 可读的工作区镜像：files/ 保存当前完整文件树，manifest.json 记录路径 → 哈希。
-//
-// 版本历史不再由插件保存：每次上传都会产生一次 git commit，
-// 任意历史版本、恢复与对比都交给 GitHub / git 本身。
+// 支持「按子路径并入」（scopePrefix）：把某个子目录工作区合并进父项目，只更新该子路径下的文件。
+// 版本历史由 git commit 承担。
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
 export const EXCLUDES = [".git", "node_modules", "out", ".venv", "__pycache__", ".dsh", ".work", "dist", "build"];
-export const MAX_FILE_BYTES = Number(process.env.CSP_MAX_FILE_BYTES) || 95 * 1024 * 1024; // 默认留余量（GitHub 单文件 100MB）；可用环境变量覆盖
-export const MAX_REL_PATH = 220; // 仓库内相对路径上限，避免 Windows 260 字符限制
+export const MAX_FILE_BYTES = Number(process.env.CSP_MAX_FILE_BYTES) || 95 * 1024 * 1024;
+export const MAX_REL_PATH = 220;
 
-// .csp-trash-<ts> 是下载镜像时移出的本地多余文件，不应再上传
 export const excluded = (name) => EXCLUDES.includes(name) || name.startsWith(".csp-trash-");
 
 function hashFile(file) {
@@ -24,7 +22,9 @@ function hashFile(file) {
 	});
 }
 
-/** 扫描目录生成清单；超过单文件上限或路径过长的单独记录。 */
+export { hashFile };
+
+/** 扫描目录生成清单。 */
 export async function buildManifest(rootDir, maxRelPath = MAX_REL_PATH) {
 	const files = {};
 	const large = [];
@@ -46,8 +46,7 @@ export async function buildManifest(rootDir, maxRelPath = MAX_REL_PATH) {
 				try {
 					const stat = await fsp.stat(full);
 					if (stat.size > MAX_FILE_BYTES) {
-						const hash = await hashFile(full);
-						large.push({ path: rel, size: stat.size, hash });
+						large.push({ path: rel, size: stat.size, hash: await hashFile(full) });
 						continue;
 					}
 					if (rel.length > maxRelPath) {
@@ -76,33 +75,80 @@ function writeJson(file, obj) {
 	fs.writeFileSync(file, JSON.stringify(obj, null, 2), "utf8");
 }
 
-/**
- * 把工作区同步为项目的最新镜像：刷新 files/、large/、manifest.json、large.json。
- * 差异统计只用于报告；历史版本由 git commit 承担。
- */
-export async function commitVersion(workspaceDir, sessionDir, options = {}) {
-	const filesDir = path.join(sessionDir, "files");
-	const manifestPath = path.join(sessionDir, "manifest.json");
-	const current = readJson(manifestPath);
-	const next = await buildManifest(workspaceDir);
+function normalizeScope(scope) {
+	return String(scope || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
 
-	let changed = 0;
+function scoped(prefix, rel) {
+	const p = normalizeScope(prefix);
+	return p ? `${p}/${rel}` : rel;
+}
+
+function underScope(key, scope) {
+	const p = normalizeScope(scope);
+	return p === "" || key === p || key.startsWith(p + "/");
+}
+
+/**
+ * 把工作区同步进项目镜像。
+ * options.scopePrefix：非空表示"该工作区是项目里的一个子目录"，只更新该子路径下的文件；
+ * options.storeLarge：是否把大文件内容写入 large/（git-lfs）。
+ * 同路径不同内容：保留云端旧版，新内容写入 conflicts/<ts>/<路径>，并在返回值里列出。
+ */
+export async function commitVersion(workspaceDir, projectDir, options = {}) {
+	const scope = normalizeScope(options.scopePrefix);
+	const mode = options.mode === "union" ? "union" : "mirror";
+	const filesDir = path.join(projectDir, "files");
+	const manifestPath = path.join(projectDir, "manifest.json");
+	const current = readJson(manifestPath) || { files: {}, large: [], tooLong: [] };
+	const incoming = await buildManifest(workspaceDir);
+	const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+	const conflictsDir = path.join(projectDir, "conflicts", stamp);
+	const conflicts = [];
+
+	const nextFiles = mode === "mirror" && scope === "" ? {} : { ...(current.files || {}) };
+	for (const key of Object.keys(nextFiles)) {
+		if (scope && underScope(key, scope) && key !== scope) delete nextFiles[key];
+	}
 	let added = 0;
+	let changed = 0;
 	let removed = 0;
-	if (current && current.files) {
-		for (const [rel, info] of Object.entries(next.files)) {
-			const before = current.files[rel];
-			if (!before) added++;
-			else if (before.hash !== info.hash) changed++;
+	const toWrite = [];
+
+	for (const [rel, info] of Object.entries(incoming.files)) {
+		const key = scoped(scope, rel);
+		const before = (current.files || {})[key];
+		if (!before) {
+			added++;
+			nextFiles[key] = info;
+			toWrite.push([rel, key, info]);
+		} else if (before.hash !== info.hash) {
+			// 冲突：云端旧版保留，本地新内容进 conflicts/
+			changed++;
+			const dest = path.join(conflictsDir, key);
+			try {
+				fs.mkdirSync(path.dirname(dest), { recursive: true });
+				await fsp.copyFile(path.join(workspaceDir, rel), dest);
+				conflicts.push({ path: key, kept: "cloud", incoming: path.relative(projectDir, dest) });
+			} catch {}
+		} else {
+			toWrite.push([rel, key, info]);
 		}
-		for (const rel of Object.keys(current.files)) if (!next.files[rel]) removed++;
+	}
+	if (scope) {
+		const incomingKeys = new Set(Object.keys(incoming.files).map((rel) => scoped(scope, rel)));
+		for (const key of Object.keys(current.files || {})) {
+			if (underScope(key, scope) && key !== scope && !incomingKeys.has(key)) removed++;
+		}
+	} else {
+		for (const key of Object.keys(current.files || {})) if (!incoming.files[key]) removed++;
 	}
 
-	// 刷新正式版文件树
+	// 写入文件
 	fs.mkdirSync(filesDir, { recursive: true });
-	for (const [rel, info] of Object.entries(next.files)) {
+	for (const [rel, key, info] of toWrite) {
 		const src = path.join(workspaceDir, rel);
-		const dest = path.join(filesDir, rel);
+		const dest = path.join(filesDir, key);
 		try {
 			const stat = await fsp.stat(dest).catch(() => null);
 			if (!stat || stat.size !== info.size || (await hashFile(dest)) !== info.hash) {
@@ -111,7 +157,7 @@ export async function commitVersion(workspaceDir, sessionDir, options = {}) {
 			}
 		} catch {}
 	}
-	const wanted = new Set(Object.keys(next.files));
+	// 删除本作用域内多余文件
 	const walkDel = async (dir, prefix) => {
 		let entries = [];
 		try {
@@ -121,32 +167,34 @@ export async function commitVersion(workspaceDir, sessionDir, options = {}) {
 		}
 		for (const entry of entries) {
 			const full = path.join(dir, entry.name);
-			const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-			if (entry.isDirectory()) await walkDel(full, rel);
-			else if (!wanted.has(rel)) await fsp.rm(full, { force: true }).catch(() => {});
+			const key = prefix ? `${prefix}/${entry.name}` : entry.name;
+			if (entry.isDirectory()) await walkDel(full, key);
+			else if (!nextFiles[key]) await fsp.rm(full, { force: true }).catch(() => {});
 		}
 	};
-	await walkDel(filesDir, "");
+	if (!(mode === "union" && scope === "")) await walkDel(filesDir, "");
 
-	// 大文件：内容存 large/，由 git-lfs 接管（可跨机恢复）
-	const largeDir = path.join(sessionDir, "large");
-	const largeEntries = [];
-	for (const entry of next.large || []) {
-		if (!options.storeLarge) {
-			largeEntries.push({ ...entry, stored: "skipped" });
-			continue;
+	// 大文件（按作用域合并清单）
+	const largeDir = path.join(projectDir, "large");
+	const currentLarge = (current.large || []).filter((entry) => !scope || !underScope(entry.path, scope));
+	const largeEntries = [...currentLarge];
+	for (const entry of incoming.large || []) {
+		const key = scoped(scope, entry.path);
+		let stored = "skipped";
+		if (options.storeLarge) {
+			const src = path.join(workspaceDir, entry.path);
+			const dest = path.join(largeDir, key);
+			try {
+				await fsp.mkdir(path.dirname(dest), { recursive: true });
+				await fsp.copyFile(src, dest);
+				stored = "lfs";
+			} catch {
+				stored = "failed";
+			}
 		}
-		const src = path.join(workspaceDir, entry.path);
-		const dest = path.join(largeDir, entry.path);
-		let stored = false;
-		try {
-			await fsp.mkdir(path.dirname(dest), { recursive: true });
-			await fsp.copyFile(src, dest);
-			stored = true;
-		} catch {}
-		largeEntries.push({ ...entry, stored: stored ? "lfs" : "failed" });
+		largeEntries.push({ ...entry, path: key, stored });
 	}
-	const keepLarge = new Set((next.large || []).map((e) => e.path));
+	const keepLarge = new Set(largeEntries.map((e) => e.path));
 	const walkLarge = async (dir, prefix) => {
 		let entries = [];
 		try {
@@ -156,26 +204,28 @@ export async function commitVersion(workspaceDir, sessionDir, options = {}) {
 		}
 		for (const entry of entries) {
 			const full = path.join(dir, entry.name);
-			const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-			if (entry.isDirectory()) await walkLarge(full, rel);
-			else if (!keepLarge.has(rel)) await fsp.rm(full, { force: true }).catch(() => {});
+			const key = prefix ? `${prefix}/${entry.name}` : entry.name;
+			if (entry.isDirectory()) await walkLarge(full, key);
+			else if (!keepLarge.has(key)) await fsp.rm(full, { force: true }).catch(() => {});
 		}
 	};
 	if (fs.existsSync(largeDir)) await walkLarge(largeDir, "");
 
-	writeJson(manifestPath, next);
-	writeJson(path.join(sessionDir, "large.json"), {
-		createdAt: next.createdAt,
-		large: largeEntries,
-		tooLong: next.tooLong,
-	});
+	const nextTooLong = [
+		...(current.tooLong || []).filter((entry) => !scope || !underScope(entry.path, scope)),
+		...(incoming.tooLong || []).map((entry) => ({ ...entry, path: scoped(scope, entry.path) })),
+	];
+	writeJson(manifestPath, { createdAt: new Date().toISOString(), files: nextFiles, large: largeEntries, tooLong: nextTooLong });
+	writeJson(path.join(projectDir, "large.json"), { createdAt: new Date().toISOString(), large: largeEntries, tooLong: nextTooLong });
 
 	return {
 		changed,
 		added,
 		removed,
-		large: (next.large || []).length,
-		tooLong: (next.tooLong || []).length,
-		files: Object.keys(next.files || {}).length,
+		conflicts,
+		scope,
+		large: (incoming.large || []).length,
+		files: Object.keys(nextFiles).length,
+		projectFiles: Object.keys(incoming.files).length,
 	};
 }
