@@ -1,0 +1,155 @@
+// 集成测试：v2 Host API 全流程（多仓库登记 / 上传合并 / 下载 / 会话 cwd 改写 / 推送）
+// 运行：node tests/integration/api.test.mjs <pluginDir> <base> <port>
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
+
+const [pluginDir, base, portArg] = process.argv.slice(2);
+const port = Number(portArg || 8891);
+const results = [];
+const check = (name, pass, detail) => {
+	results.push({ name, pass });
+	console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? "  " + detail : ""}`);
+};
+
+const home = path.join(base, "home");
+const repo = path.join(base, "toolrepo");
+const remote = path.join(base, "remote.git");
+const tree = path.join(base, "tree");
+const proj = path.join(tree, "proj");
+const sub = path.join(proj, "sub");
+const downloadRoot = path.join(base, "download-check");
+
+const projectKeyOf = (p) => {
+	let out = "";
+	let sep = false;
+	for (const ch of p) {
+		if (ch === "/" || ch === "\\" || ch === ":") {
+			if (!sep) out += "-";
+			sep = true;
+		} else if (ch !== "~" && /^[A-Za-z0-9._-]$/.test(ch)) {
+			out += ch;
+			sep = false;
+		} else {
+			out += "~" + ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0");
+			sep = false;
+		}
+	}
+	return `--${out.replace(/^-+/, "") || "root"}--`;
+};
+const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+const readHeader = (file) => {
+	const buf = fs.readFileSync(file);
+	const at = buf.indexOf(MAGIC);
+	const next = buf.indexOf(MAGIC, at + 4);
+	return JSON.parse(zstdDecompressSync(buf.subarray(at, next < 0 ? buf.length : next)).toString("utf8").split("\n").find(Boolean));
+};
+const makeSession = (cwd, id) => {
+	const dir = path.join(home, "sessions", projectKeyOf(cwd), id);
+	fs.mkdirSync(dir, { recursive: true });
+	const header = JSON.stringify({ type: "session", version: 4, id, createdAt: 1, cwd });
+	fs.writeFileSync(path.join(dir, "session.v4.jsonl.zstd"), zstdCompressSync(Buffer.from(header + "\n", "utf8")));
+};
+
+fs.rmSync(base, { recursive: true, force: true });
+fs.mkdirSync(proj, { recursive: true });
+fs.mkdirSync(sub, { recursive: true });
+fs.mkdirSync(path.join(home, "storages"), { recursive: true });
+fs.writeFileSync(
+	path.join(home, "storages", "workspace.json"),
+	JSON.stringify({ unit: { name: "workspace", version: 2 }, global: { initialized: true, workspaceIds: [], defaultWorkspaceId: null }, tables: { workspaces: {} } }),
+	"utf8",
+);
+fs.writeFileSync(path.join(proj, "a.txt"), "A1\n", "utf8");
+fs.writeFileSync(path.join(sub, "b.txt"), "B1\n", "utf8");
+
+const sidProj = "session-11111111-1111-4111-8111-111111111111";
+const sidSub = "session-22222222-2222-4222-8222-222222222222";
+const sidTree = "session-33333333-3333-4333-8333-333333333333";
+makeSession(proj, sidProj);
+makeSession(sub, sidSub);
+makeSession(tree, sidTree);
+process.env.DSH_HOME = home;
+
+const git = (args, cwd = repo) => execFileSync("git", args, { cwd, stdio: "ignore" });
+fs.mkdirSync(repo, { recursive: true });
+execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+git(["init", "-b", "main"]);
+git(["config", "user.name", "T"]);
+git(["config", "user.email", "t@local"]);
+git(["remote", "add", "origin", remote]);
+fs.writeFileSync(path.join(repo, ".gitignore"), "out/\n", "utf8");
+git(["add", "-A"]);
+git(["commit", "-m", "init"]);
+
+const mod = await import(pathToFileURL(path.join(pluginDir, "index.js")).href);
+let dispose = null;
+const started = await mod.apply({ effect: (fn) => { dispose = fn; } }, { workspace: repo, port });
+const baseUrl = `http://127.0.0.1:${started.port}`;
+const token = (await fetch(baseUrl + "/token").then((r) => r.json())).token;
+const call = (p, init) => fetch(`${baseUrl}${p}${p.includes("?") ? "&" : "?"}token=${token}`, init).then((r) => r.json());
+const post = (p, body) => call(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
+const projectsRoot = path.join(repo, "index", "projects");
+const storeRoot = path.join(repo, "store");
+
+// 登记仓库
+let response = await post("/api/repos", { path: repo, name: "主仓库" });
+check("R1 登记本机仓库", response.ok === true && response.repos.length === 1, JSON.stringify(response.repos));
+const repoId = response.repos[0].id;
+
+// 首次上传
+response = await post("/api/upload-project", { cwd: proj, sessionIds: [sidProj], repoId });
+check("U1 首次上传成功", response.ok === true);
+const projName = fs.readdirSync(projectsRoot)[0];
+check("U2 store/index 分离且文件保持结构", fs.existsSync(path.join(storeRoot, projName, "files", "sub", "b.txt")) && fs.existsSync(path.join(projectsRoot, projName, "manifest.json")));
+
+// 子目录工作区 → 并入父项目
+response = await post("/api/upload-project", { cwd: sub, sessionIds: [sidSub], repoId });
+check("U3 子目录合并（不新建项目）", response.ok === true && fs.readdirSync(projectsRoot).length === 1 && response.projectName === projName);
+const projMeta = readJson(path.join(projectsRoot, projName, "meta.json"));
+check("U4 记录子目录 alias", (projMeta.aliases || []).some((alias) => alias.scope === "sub"));
+check("U5 子目录会话存到父项目", fs.existsSync(path.join(projectsRoot, projName, "sessions", sidSub, "session.v4.jsonl.zstd")));
+const ref = readJson(path.join(projectsRoot, projName, "sessions", sidSub, "workspace-ref.json"));
+check("U6 会话带 workspace-ref", ref.project === projName && ref.scope === "sub" && /^[0-9a-f]{64}$/.test(ref.manifestHash));
+
+// 父工作区包含旧项目 → 旧项目迁入新项目
+fs.writeFileSync(path.join(proj, "a.txt"), "A2\n", "utf8");
+response = await post("/api/upload-project", { cwd: tree, sessionIds: [sidTree], repoId });
+const treeName = fs.readdirSync(projectsRoot)[0];
+check("U7 父工作区合并后只保留一个项目", response.ok === true && fs.readdirSync(projectsRoot).length === 1, JSON.stringify(fs.readdirSync(projectsRoot)));
+check("U8 旧项目文件迁入新 store", fs.existsSync(path.join(storeRoot, treeName, "files", "proj", "sub", "b.txt")));
+check("U9 冲突文件被隔离", fs.existsSync(path.join(projectsRoot, treeName, "conflicts")));
+check("U10 旧项目会话被迁移", fs.existsSync(path.join(projectsRoot, treeName, "sessions", sidProj, "session.v4.jsonl.zstd")));
+const treeMeta = readJson(path.join(projectsRoot, treeName, "meta.json"));
+check("U11 父项目记录嵌套 alias", (treeMeta.aliases || []).some((alias) => alias.scope === "proj") && (treeMeta.aliases || []).some((alias) => alias.scope === "proj/sub"));
+
+// 视图
+const treeView = await call("/api/tree");
+check("V1 项目树只有一个工作区行", (treeView.projects || []).length === 1, JSON.stringify((treeView.projects || []).map((p) => p.name)));
+const cloudView = await call("/api/cloud-view");
+check("V2 云端视图聚合", cloudView.ok === true && (cloudView.projects || []).length === 1);
+
+// 下载（工作区 + 会话）
+response = await post("/api/download-project", { repoId, name: treeName, targetDir: downloadRoot, sessionIds: [sidSub], withWorkspace: true });
+check("D1 下载成功", response.ok === true);
+check("D2 工作区文件还原", fs.existsSync(path.join(downloadRoot, "proj", "sub", "b.txt")) && fs.existsSync(path.join(downloadRoot, "proj", "a.txt")));
+check("D3 下载校验通过", response.workspace && response.workspace.verified === response.workspace.written, JSON.stringify({ written: response.workspace?.written, verified: response.workspace?.verified, failed: response.workspace?.failed }));
+const dlSession = path.join(home, "sessions", projectKeyOf(downloadRoot), sidSub, "session.v4.jsonl.zstd");
+check("D4 会话下载并改写 cwd", fs.existsSync(dlSession) && readHeader(dlSession).cwd === downloadRoot);
+check("D5 工作区登记", response.registration && response.registration.ok === true, JSON.stringify(response.registration));
+
+// 推送与历史
+const remoteLog = execFileSync("git", ["log", "--oneline", "-1", "main"], { cwd: remote, encoding: "utf8" }).trim();
+check("G1 已推送到远端", remoteLog.length > 0, remoteLog);
+const headTree = execFileSync("git", ["ls-tree", "-r", "--name-only", "main"], { cwd: remote, encoding: "utf8" });
+check("G2 远端提交包含 store/index", headTree.includes("store/") && headTree.includes("index/projects/"));
+
+dispose();
+await new Promise((resolve) => setTimeout(resolve, 200));
+const failed = results.filter((item) => !item.pass);
+console.log(`\n汇总：${results.length - failed.length}/${results.length} 通过`);
+if (failed.length) console.log("失败：", failed.map((item) => item.name).join("；"));
+process.exitCode = failed.length ? 1 : 0;
