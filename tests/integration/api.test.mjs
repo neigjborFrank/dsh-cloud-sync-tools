@@ -86,7 +86,8 @@ git(["commit", "-m", "init"]);
 
 const mod = await import(pathToFileURL(path.join(pluginDir, "index.js")).href);
 let dispose = null;
-const started = await mod.apply({ effect: (fn) => { dispose = fn(); } }, { workspace: repo, port });
+mod.apply({ effect: (fn) => { dispose = fn(); } }, { workspace: repo, port });
+const started = await mod.whenReady();
 const baseUrl = `http://127.0.0.1:${started.port}`;
 const token = (await fetch(baseUrl + "/token").then((r) => r.json())).token;
 const call = (p, init) => fetch(`${baseUrl}${p}${p.includes("?") ? "&" : "?"}token=${token}`, init).then((r) => r.json());

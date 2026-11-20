@@ -1,14 +1,23 @@
 // 插件入口：启动本地 HTTP 服务；repoRoot 为登记表与 git 仓库所在位置
 //
-// 生命周期注意：DSH 要求 apply 同步注册 effect（旧版插件即如此）。
-// 若在 await 之后才调用 ctx.effect，上下文可能已失效，导致
-// "cannot create effect on inactive context" 并使插件加载失败。
+// DSH 插件生命周期约束（旧版插件即如此）：
+//  1. apply 必须是同步函数、返回 void，并在同步阶段注册 ctx.effect；
+//  2. 不能在 await 之后注册 effect（会报 cannot create effect on inactive context，
+//     触发 DSH 的"禁用第三方插件"恢复，导致插件被移出 profile）；
+//  3. HTTP 服务异步启动；失败只记录日志，不向宿主抛错。
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { startServer } from "./lib/host/server.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+let readyPromise = null;
+
+/** 供测试/工具等待服务就绪（DSH 宿主不会调用） */
+export function whenReady() {
+	return readyPromise || Promise.resolve(null);
+}
 
 export function apply(ctx, config = {}) {
 	const repoRoot = config.workspace ? path.resolve(config.workspace) : path.resolve(here, "..");
@@ -29,8 +38,8 @@ export function apply(ctx, config = {}) {
 		}
 	}
 
-	// 异步启动 HTTP 服务；返回的 Promise 供测试/工具等待就绪，DSH 侧会忽略它
-	return startServer({
+	// 异步启动 HTTP 服务；返回 Promise 供工具等待，不返回给 DSH（apply 保持 void）
+	readyPromise = startServer({
 		repoRoot,
 		port,
 		workspaceRegistry: ctx && ctx.workspaceRegistry,
@@ -42,7 +51,6 @@ export function apply(ctx, config = {}) {
 			return { port: started.port, token: started.token };
 		})
 		.catch((error) => {
-			// 服务启动失败（如端口占用）只记录，不向 DSH 抛未处理拒绝，避免影响宿主启动
 			console.error("[cloud-sync-panel] 启动同步服务失败：", error && error.message ? error.message : error);
 			return null;
 		});
