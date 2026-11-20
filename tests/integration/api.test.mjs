@@ -100,6 +100,16 @@ let response = await post("/api/repos", { path: repo, name: "主仓库" });
 check("R1 登记本机仓库", response.ok === true && response.repos.length === 1, JSON.stringify(response.repos));
 const repoId = response.repos[0].id;
 
+// 通过 URL 克隆登记（对应"配置私有仓库地址"：git@... 或本机 bare 路径）
+const remote2 = path.join(base, "remote2.git");
+execFileSync("git", ["init", "--bare", remote2], { stdio: "ignore" });
+response = await post("/api/repos", { url: remote2, name: "URL 仓库" });
+const clonedDir = path.join(home, "cloud-sync", "repos", "remote2");
+check("R2 通过 URL 克隆登记私有仓库", response.ok === true && response.repos.length === 2 && fs.existsSync(path.join(clonedDir, ".git")), JSON.stringify(response.repos.map((r) => r.name)));
+response = await post("/api/repos/remove", { id: response.repos[1].id });
+check("R3 移除 URL 仓库后只剩主仓库", response.ok === true && response.repos.length === 1);
+
+
 // 首次上传
 response = await post("/api/upload-project", { cwd: proj, sessionIds: [sidProj], repoId });
 check("U1 首次上传成功", response.ok === true);
