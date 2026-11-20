@@ -7,8 +7,8 @@
 - [x] **M1 骨架与数据层**：`lib/shared.js`、`lib/core/{layout,manifest,project,mirror,lfs}.js` + 单元测试
 - [x] **M2 会话与仓库层**：`core/{session,repo,registry}.js` + 单元测试（会话枚举/上传/下载/cwd 改写、多仓库登记绑定、注册表自愈）
 - [x] **M3 Host API**：`lib/host/{server,routes,views}.js`、`core/{git,merge,download}.js` + 集成测试（21/21）
-- [ ] M4 前端：`client/*`
-- [ ] M5 安装/更新/发布
+- [x] **M4 前端**：`client.js`（DSH 脚本加载，单文件分区组织：API/项目树/上传/下载/仓库管理/云端与同步）
+- [ ] M5 安装/更新/发布（install/update 已切到 v2；干净克隆 + 临时 DSH_HOME 验证待执行）
 - [ ] M6 清理与验收
 
 > 架构细节见 `docs/架构说明-v2.md`（每个里程碑同步更新）。

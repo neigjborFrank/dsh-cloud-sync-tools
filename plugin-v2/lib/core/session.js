@@ -76,10 +76,20 @@ function readTitle(sessionId, home) {
 }
 
 /** 列出本机会话（跨所有 projectKey 目录，按 id 去重） */
+function loadArchivedIds(home) {
+	try {
+		const json = readJson(path.join(home, "storages", "workspace.json"));
+		return new Set((json && json.global && json.global.archivedSessionIds) || []);
+	} catch {
+		return new Set();
+	}
+}
+
 export function listSessions(home = dshHome()) {
 	const root = path.join(home, "sessions");
 	const out = [];
 	const seen = new Set();
+	const archivedIds = loadArchivedIds(home);
 	let projects = [];
 	try {
 		projects = fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory());
@@ -115,6 +125,7 @@ export function listSessions(home = dshHome()) {
 			const header = readHeader(file) || {};
 			out.push({
 				id: sessionEntry.name,
+				archived: archivedIds.has(sessionEntry.name),
 				projectDir: projectEntry.name,
 				file: files[0],
 				filePath: file,

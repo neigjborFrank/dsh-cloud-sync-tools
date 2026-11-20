@@ -49,7 +49,10 @@ export function createRoutes(ctx) {
 			return { ok: true, repos: publicRepos() };
 		},
 
-		"GET /api/tree": () => buildTree(listRepos()),
+		"GET /api/tree": () => {
+			const repos = listRepos();
+			return { ...buildTree(repos), repos: publicRepos(), suggestedBase: ctx.workspaceBase || "" };
+		},
 
 		"GET /api/cloud-view": async () => buildCloudView(listRepos()),
 

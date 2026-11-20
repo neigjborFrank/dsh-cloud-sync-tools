@@ -56,8 +56,16 @@ export async function startServer({ repoRoot, port = 8732, workspaceRegistry, di
 
 		if (request.method === "OPTIONS") return sendJson(response, 200, {});
 
-		// token 端点不需要鉴权
+		// token 与健康检查端点不需要鉴权（客户端探活在取 token 之前）
 		if (pathname === "/token" && request.method === "GET") return sendJson(response, 200, { ok: true, token, port });
+		if (pathname === "/api/health" && request.method === "GET") {
+			try {
+				const result = await routes["GET /api/health"]();
+				return sendJson(response, 200, { ok: true, ...result });
+			} catch (error) {
+				return sendJson(response, 500, { ok: false, error: "internal", output: error.message });
+			}
+		}
 
 		const key = `${request.method} ${pathname}`;
 		const handler = routes[key];

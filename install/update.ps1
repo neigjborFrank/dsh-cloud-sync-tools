@@ -49,7 +49,7 @@ Write-Ok "代码已更新：$($before.Substring(0,7)) → $($after.Substring(0,7
 $changed = $true
 if (-not $DryRun) {
     $diff = git -C $repoRoot diff --name-only $before $after 2>$null
-    $changed = $diff -match "plugin/package.json|plugin/lib/|plugin/index.js|plugin/client.js"
+    $changed = $diff -match "plugin-v2/package.json|plugin-v2/lib/|plugin-v2/index.js|plugin-v2/client.js"
 }
 if ($changed) {
     if (-not $DshHome) { $DshHome = Join-Path $env:USERPROFILE ".dsh" }

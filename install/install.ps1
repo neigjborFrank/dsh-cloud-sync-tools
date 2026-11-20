@@ -14,7 +14,8 @@ param(
     [string]$DshHome = "",
     [string]$ProfileName = "desktop",
     [switch]$DryRun,
-    [switch]$RegisterRepo
+    [switch]$RegisterRepo,
+    [string]$NodePath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -61,7 +62,8 @@ if (-not $repoRoot) {
 }
 Write-Ok "仓库根目录：$repoRoot"
 
-$pluginDir = Join-Path $repoRoot "plugin"
+$pluginDir = Join-Path $repoRoot "plugin-v2"
+if (-not (Test-Path $pluginDir)) { $pluginDir = Join-Path $repoRoot "plugin" }
 if (-not (Test-Path $pluginDir)) { $pluginDir = Join-Path $repoRoot "_repo\tools\panel\plugin" }
 if (-not (Test-Path $pluginDir)) { Write-Err "找不到插件目录：$pluginDir"; exit 1 }
 
@@ -83,6 +85,7 @@ $nodeExe = Join-Path $DshHome "dsh-runtimes\dsh-primary-runtime\dependencies\nod
 if (-not (Test-Path $nodeExe)) {
     $found = Get-ChildItem (Join-Path $DshHome "dsh-runtimes") -Recurse -Filter node.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($found) { $nodeExe = $found.FullName }
+    if ($NodePath -and (Test-Path $NodePath)) { $nodeExe = $NodePath }
 }
 if (-not (Test-Path $nodeExe)) { $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source }
 if (-not $nodeExe) { Write-Err "找不到 node（DSH 未安装完整？）"; exit 1 }
@@ -107,7 +110,7 @@ $pluginLink = ($pluginDir -replace '\\', '/')
 $editJs = @'
 const fs = require("fs");
 const [file, linkPath] = process.argv.slice(2);
-const json = JSON.parse(fs.readFileSync(file, "utf8"));
+const json = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
 json.dependencies = json.dependencies || {};
 json.dependencies["dsh-plugin-cloud-sync-panel"] = "link:" + linkPath;
 json.dsh = json.dsh || {};
@@ -172,7 +175,7 @@ const [repoRoot, reposFile] = process.argv.slice(2);
 function run(cwd, args) {
   try { return require("child_process").execFileSync("git", args, { cwd, encoding: "utf8" }).trim(); } catch { return ""; }
 }
-let registry = { version: 1, repos: [] };
+let registry = { schema: 2, repos: [], bindings: {} };
 try { registry = JSON.parse(fs.readFileSync(reposFile, "utf8")); } catch {}
 registry.repos = Array.isArray(registry.repos) ? registry.repos : [];
 if (!registry.repos.some((r) => path.resolve(r.path) === path.resolve(repoRoot))) {
@@ -202,7 +205,7 @@ console.log("repos:", registry.repos.map((r) => r.name).join(", "));
 
 Write-Host ""
 Write-Ok "安装完成。"
-Write-Host "下一步：彻底退出 DSH（托盘也要退出）后重新启动。" -ForegroundColor Cyan
+Write-Host "下一步：彻底退出 DSH（托盘也要退出）后重新启动（加载插件 v2）。" -ForegroundColor Cyan
 Write-Host "侧边栏底部会出现「同步」按钮；先在「仓库管理…」登记你自己的私有仓库。" -ForegroundColor Cyan
 if (-not $DryRun) {
     Write-Host ""
