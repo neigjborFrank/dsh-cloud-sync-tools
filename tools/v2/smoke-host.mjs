@@ -21,7 +21,7 @@ const check = (name, pass, detail) => {
 
 const mod = await import(pathToFileURL(path.join(pluginDir, "index.js")).href);
 let dispose = null;
-const started = await mod.apply({ effect: (fn) => { dispose = fn; } }, { workspace: root, port });
+const started = await mod.apply({ effect: (fn) => { dispose = fn(); } }, { workspace: root, port });
 const base = `http://127.0.0.1:${started.port}`;
 const get = async (apiPath, token) => {
 	const url = `${base}${apiPath}${token ? (apiPath.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token) : ""}`;

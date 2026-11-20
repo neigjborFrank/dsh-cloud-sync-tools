@@ -73,7 +73,7 @@ execFileSync("git", ["-C", bare, "symbolic-ref", "HEAD", "refs/heads/main"], { s
 const toolRoot = path.resolve(pluginDir, "..");
 const mod = await import(pathToFileURL(path.join(pluginDir, "index.js")).href);
 let dispose = null;
-const started = await mod.apply({ effect: (fn) => { dispose = fn; } }, { workspace: toolRoot, port });
+const started = await mod.apply({ effect: (fn) => { dispose = fn(); } }, { workspace: toolRoot, port });
 const baseUrl = `http://127.0.0.1:${started.port}`;
 const token = (await fetch(`${baseUrl}/token`).then((response) => response.json())).token;
 const call = (apiPath, init) => fetch(`${baseUrl}${apiPath}${apiPath.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`, init).then((response) => response.json());
