@@ -17,12 +17,16 @@ export function apply(ctx, config = {}) {
 	let server = null;
 	let closed = false;
 
-	// 同步注册 effect：只负责关闭服务，不阻塞插件加载
+	// 同步注册 effect：只负责关闭服务，不阻塞插件加载；注册失败也不能影响 DSH 启动
 	if (ctx && typeof ctx.effect === "function") {
-		ctx.effect(() => () => {
-			closed = true;
-			if (server) server.close();
-		});
+		try {
+			ctx.effect(() => () => {
+				closed = true;
+				if (server) server.close();
+			});
+		} catch (error) {
+			console.error("[cloud-sync-panel] 注册 effect 失败：", error && error.message ? error.message : error);
+		}
 	}
 
 	// 异步启动 HTTP 服务；返回的 Promise 供测试/工具等待就绪，DSH 侧会忽略它
@@ -38,7 +42,8 @@ export function apply(ctx, config = {}) {
 			return { port: started.port, token: started.token };
 		})
 		.catch((error) => {
+			// 服务启动失败（如端口占用）只记录，不向 DSH 抛未处理拒绝，避免影响宿主启动
 			console.error("[cloud-sync-panel] 启动同步服务失败：", error && error.message ? error.message : error);
-			throw error;
+			return null;
 		});
 }
