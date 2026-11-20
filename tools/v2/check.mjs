@@ -64,6 +64,8 @@ check("VERSION 与 package.json 版本一致", version === pkg.version, `${versi
 // 5) 入口导出
 const entry = fs.readFileSync(path.join(pluginRoot, "index.js"), "utf8");
 check("index.js 导出 apply", entry.includes("export async function apply") || entry.includes("export function apply"));
+check("apply 必须是同步函数（DSH 生命周期契约）", !entry.includes("export async function apply") && entry.includes("export function apply"));
+check("apply 所在入口不出现 await（注册 effect 必须同步）", !/\bawait\b/.test(entry));
 
 const failed = results.filter((item) => !item.pass);
 console.log(`\n质量门禁：${results.length - failed.length}/${results.length} 通过`);
