@@ -1,0 +1,7 @@
+# dsh bundle patch: 把本插件插入 profile 的层栈。
+# 仓库根目录由插件位置自动推导；不写死 workspace。
+- insert:
+    - id: cloud-sync-panel
+      name: 'dsh-plugin-cloud-sync-panel'
+      config:
+        port: 8732

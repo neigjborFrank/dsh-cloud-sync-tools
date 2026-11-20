@@ -1,0 +1,31 @@
+{
+  "name": "dsh-plugin-cloud-sync-panel",
+  "version": "2.0.0-alpha.1",
+  "private": true,
+  "description": "DSH cloud sync panel v2 (rewrite): archive workspaces and sessions to user's private Git repositories.",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "lib"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  }
+}
