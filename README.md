@@ -55,12 +55,19 @@ index/projects/<项目>/           # 清单、会话、映射关系（不含文�
 ## 测试
 
 ```powershell
-# 单元测试（13 项）
+# 单元测试（16 项）
 node --test tests/unit/core.test.mjs
 node --test tests/unit/session_repo.test.mjs
+node --test tests/unit/client_static.test.mjs
 
-# 集成测试（22 项，使用真实 git 仓库与 bare 远端；不会碰真实 DSH 数据）
+# 集成测试（23 项，使用真实 git 仓库与 bare 远端；不会碰真实 DSH 数据）
 node tests/integration/api.test.mjs <仓库根>/plugin-v2 <临时目录> 8910
+
+# 全新环境端到端（14 项：私有仓库地址配置 → 上传 → 新设备克隆下载）
+node tests/integration/clean_setup.test.mjs <仓库根>/plugin-v2 <临时目录> 8930
+
+# 真实私有仓库只读兼容（7 项）
+node tests/integration/compat.test.mjs <私有仓库克隆> <临时目录>
 ```
 
 ## 安全与边界
