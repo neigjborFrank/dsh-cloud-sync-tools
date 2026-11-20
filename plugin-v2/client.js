@@ -518,12 +518,13 @@ window.__ModuleLoader__.load({
 						return `有未上传改动（${parts.join(" / ") || "有变化"}）`;
 					}
 					if (status === "cloud-only") return "仅云端（本地缺失）";
+					if (status === "not-uploaded") return "云端未上传";
 					return "无法判断";
 				};
 				const workspaceStatusClass = (workspace) => {
 					const status = workspace ? workspace.status : "cloud-only";
 					if (status === "clean") return "ok";
-					if (status === "dirty") return "warn";
+					if (status === "dirty" || status === "not-uploaded") return "warn";
 					return "muted";
 				};
 				const sessionStatusText = (state) => {

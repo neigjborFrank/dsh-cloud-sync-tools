@@ -55,6 +55,9 @@ index/projects/<项目>/           # 清单、会话、映射关系（不含文�
 ## 测试
 
 ```powershell
+# 质量门禁（6 项：文件规模/依赖方向/前端接口/版本一致）
+node tools/v2/check.mjs
+
 # 单元测试（16 项）
 node --test tests/unit/core.test.mjs
 node --test tests/unit/session_repo.test.mjs

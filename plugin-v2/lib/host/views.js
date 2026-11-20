@@ -130,7 +130,9 @@ export async function buildCloudView(repos) {
 			const local = localByName.get(name) || null;
 			const cwd = (local && local.cwd) || (cloudProject && cloudProject.cwd) || "";
 
-			let workspace = { status: "cloud-only", changed: 0, added: 0, removed: 0, files: 0 };
+			let workspace = cloudProject
+				? { status: "cloud-only", changed: 0, added: 0, removed: 0, files: 0 }
+				: { status: "not-uploaded", changed: 0, added: 0, removed: 0, files: 0 };
 			if (cloudProject && cwd && fs.existsSync(cwd)) {
 				const cloud = readManifest(cloudProject.layoutDir);
 				const now = await buildManifest(cwd);
