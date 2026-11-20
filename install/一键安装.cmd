@@ -1,18 +1,16 @@
-# 一键安装：把云端同步面板装进本机的 DSH（Windows）
-#
-# 用法（在克隆好的仓库里）：
-#   双击运行本文件，或在 cmd 里执行：
-#     _repo\install\一键安装.cmd
-#
-# 如果还没有克隆仓库，也可以直接带上仓库地址运行：
-#     _repo\install\一键安装.cmd git@github.com:you/repo.git
-#   （此时脚本会先克隆到 %USERPROFILE%\Documents\deepseek-harness\<仓库名>，再安装）
-#
-# 可选参数直接透传给 install.ps1，例如：
-#     一键安装.cmd "" -DryRun
 @echo off
-setlocal
 chcp 65001 >nul
+setlocal
+rem 一键安装：把云端同步面板装进本机 DSH（Windows）
+rem
+rem 用法：
+rem   1) 在克隆好的仓库里双击本文件；
+rem   2) 或先克隆，再在终端执行 install\一键安装.cmd；
+rem   3) 如果还没有克隆，也可以直接带公开仓库地址运行：
+rem      install\一键安装.cmd https://github.com/neigjborFrank/dsh-cloud-sync-tools.git
+rem
+rem 安装脚本会先备份 profile，再写入插件依赖；默认不登记任何同步仓库。
+
 set "REPO_URL=%~1"
 set "SCRIPT=%~dp0install.ps1"
 if not exist "%SCRIPT%" (

@@ -14,13 +14,20 @@
 | `docs/` | 策划案、架构说明、安装说明、落盘规则 |
 | `tools/`、`logs/` | 辅助工具与历史故障记录 |
 
+## 前提条件
+
+- Windows 10/11，已安装 DSH 并至少启动过一次；
+- 已安装 Git（node/pnpm 由 DSH 自带，无需单独安装）；
+- 一个你自己的**私密 Git 仓库**（GitHub / Gitee / 自建均可），并配置好本机访问凭据（SSH key 或 HTTPS 凭据）。
+
 ## 快速开始（新设备 / 全新安装）
 
 1. 克隆本仓库：
    ```powershell
-   git clone git@github.com:neigjborFrank/dsh-cloud-sync-tools.git C:\Users\<你>\Documents\deepseek-harness\cloud-sync-tools
+   # 公开工具仓库用 HTTPS 克隆即可（无需 SSH key）
+git clone https://github.com/neigjborFrank/dsh-cloud-sync-tools.git C:\Users\<你>\Documents\deepseek-harness\cloud-sync-tools
    ```
-2. 运行一键安装（默认安装 `plugin-v2`，**不会**自动登记任何仓库）：
+2. 运行一键安装（默认安装 `plugin-v2`，**不会**自动登记任何仓库；脚本会自动备份 profile）：
    ```powershell
    C:\Users\<你>\Documents\deepseek-harness\cloud-sync-tools\install\一键安装.cmd
    ```
