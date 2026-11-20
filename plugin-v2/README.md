@@ -5,7 +5,7 @@
 ## 当前进度
 
 - [x] **M1 骨架与数据层**：`lib/shared.js`、`lib/core/{layout,manifest,project,mirror,lfs}.js` + 单元测试
-- [ ] M2 会话与仓库层：`core/{session,repo,registry}.js`
+- [x] **M2 会话与仓库层**：`core/{session,repo,registry}.js` + 单元测试（会话枚举/上传/下载/cwd 改写、多仓库登记绑定、注册表自愈）
 - [ ] M3 Host API：`lib/host/{server,routes/*}`、`core/git.js`
 - [ ] M4 前端：`client/*`
 - [ ] M5 安装/更新/发布
