@@ -38,7 +38,13 @@ if (!fs.existsSync(path.join(repoRoot, ".git"))) {
 }
 fs.rmSync(cloud, { recursive: true, force: true });
 const { execFileSync } = await import("node:child_process");
-execFileSync("git", ["clone", "--quiet", repoRoot, cloud], { stdio: "ignore" });
+try {
+	// 数据仓库可能包含 Windows 长路径，克隆时开启 longpaths
+	execFileSync("git", ["-c", "core.longpaths=true", "clone", "--quiet", repoRoot, cloud], { stdio: ["ignore", "pipe", "pipe"] });
+} catch (error) {
+	console.log("clone 失败：", String(error.stderr || "").trim() || error.message);
+	process.exit(2);
+}
 const layoutNow = fs.existsSync(path.join(cloud, "index"))
 	? "v2 (store/index)"
 	: fs.existsSync(path.join(cloud, "projects"))
@@ -52,6 +58,7 @@ check("C2 能列出项目", projects.length >= 1, JSON.stringify(projects.map((p
 
 let totalFiles = 0;
 let mismatch = 0;
+const mismatchDetail = [];
 for (const proj of projects) {
 	const manifestPath = path.join(proj.layoutDir, "manifest.json");
 	if (!fs.existsSync(manifestPath)) continue;
@@ -59,10 +66,16 @@ for (const proj of projects) {
 	for (const [rel, info] of Object.entries(json.files || {})) {
 		totalFiles++;
 		const file = path.join(proj.storeFiles, rel);
-		if (!fs.existsSync(file) || sha(file) !== info.hash) mismatch++;
+		if (!fs.existsSync(file)) {
+			mismatch++;
+			mismatchDetail.push({ rel, reason: "missing" });
+		} else if (sha(file) !== info.hash) {
+			mismatch++;
+			mismatchDetail.push({ rel, reason: "hash-diff" });
+		}
 	}
 }
-check("C3 清单中的每个文件都在存储区且哈希一致", mismatch === 0, `${totalFiles} 个文件，${mismatch} 个不一致`);
+check("C3 清单中的每个文件都在存储区且哈希一致", mismatch === 0, `${totalFiles} 个文件，${mismatch} 个不一致 ${JSON.stringify(mismatchDetail.slice(0, 6))}`);
 
 // 3) 会话
 const cloudSessions = session.listCloudSessions(cloud);

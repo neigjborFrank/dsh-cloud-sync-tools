@@ -9,7 +9,7 @@
 - [x] **M3 Host API**：`lib/host/{server,routes,views}.js`、`core/{git,merge,download}.js` + 集成测试（21/21）
 - [x] **M4 前端**：`client.js`（DSH 脚本加载，单文件分区组织：API/项目树/上传/下载/仓库管理/云端与同步）
 - [x] **M5 安装/更新/发布**：install/update 已切到 v2；干净克隆 + 临时 DSH_HOME 安装验证通过（默认不登记仓库）
-- [ ] M6 清理与验收（旧插件归档、全量回归、真实切换）
+- [ ] M6 清理与验收（旧插件归档副本已完成、全量回归通过；待真实设备干净克隆安装）
 
 > 架构细节见 `docs/架构说明-v2.md`（每个里程碑同步更新）。
 

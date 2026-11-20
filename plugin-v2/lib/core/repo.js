@@ -134,9 +134,11 @@ export async function addRepo({ url, name, path: existingPath, branch = "main" }
 		repoPath = path.join(dshHome(), "cloud-sync", "repos", slugify(cleanUrl));
 		if (!fs.existsSync(path.join(repoPath, ".git"))) {
 			fs.mkdirSync(path.dirname(repoPath), { recursive: true });
-			const clone = await runGit(path.dirname(repoPath), ["clone", cleanUrl, repoPath], 600000);
+			// -c core.longpaths=true：数据仓库可能包含 Windows 长路径，否则 checkout 会失败
+			const clone = await runGit(path.dirname(repoPath), ["-c", "core.longpaths=true", "clone", cleanUrl, repoPath], 600000);
 			if (clone.code !== 0) throw new Error("克隆失败：" + (clone.err || clone.out).trim());
 		}
+		await runGit(repoPath, ["config", "core.longpaths", "true"], 15000);
 	} else if (!fs.existsSync(path.join(repoPath, ".git"))) {
 		throw new Error("本地路径不是 git 仓库：" + repoPath);
 	}

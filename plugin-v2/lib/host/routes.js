@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { AppError } from "../shared.js";
 import { downloadWorkspace } from "../core/download.js";
-import { commitAndPush, ensureGitConfig, ensureLfs } from "../core/git.js";
+import { commitAndPush, ensureAttributes, ensureGitConfig, ensureLfs } from "../core/git.js";
 import { uploadWorkspace } from "../core/merge.js";
 import { listProjects } from "../core/project.js";
 import { addRepo, defaultRepo, findRepo, listBindings, listRepos, publicRepos, removeRepo, setBinding } from "../core/repo.js";
@@ -67,6 +67,7 @@ export function createRoutes(ctx) {
 			const lines = [`目标仓库：${repo.name}`];
 
 			const lfsReady = await ensureLfs(repo.path);
+			await ensureAttributes(repo.path);
 			await ensureGitConfig(repo.path);
 			const result = await uploadWorkspace(repo.path, cwd, { storeLarge: lfsReady });
 			setBinding(result.projectName, repo.id);

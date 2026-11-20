@@ -30,6 +30,29 @@ export async function ensureLfs(repoPath) {
 	return true;
 }
 
+/** 确保 data 仓库使用二进制模式保存文件，避免 CRLF 归一化破坏清单哈希 */
+export async function ensureAttributes(repoPath) {
+	const file = path.join(repoPath, ".gitattributes");
+	const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+	const lines = existing.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+	// 移除旧的全局 text 归一化规则（会改变文件字节，导致 manifest 哈希不一致）
+	const kept = lines.filter((line) => !line.startsWith("* ") && line !== "*" && !line.startsWith("store/**/large/**"));
+	const required = ["* -text", "store/**/large/** filter=lfs diff=lfs merge=lfs -text"];
+	let changed = false;
+	for (const line of required) {
+		if (!kept.includes(line)) {
+			kept.push(line);
+			changed = true;
+		}
+	}
+	if (changed || kept.length !== lines.length) {
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, kept.join("\n") + "\n", "utf8");
+		return true;
+	}
+	return false;
+}
+
 /** 提交全部改动并推送；无变化时不提交 */
 export async function commitAndPush(repoPath, message) {
 	await runGit(repoPath, ["add", "-A"], 120000);
