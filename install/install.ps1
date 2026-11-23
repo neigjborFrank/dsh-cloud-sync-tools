@@ -179,8 +179,9 @@ if (-not (Test-Path $pnpmCjs)) {
     $found = Get-ChildItem (Join-Path $DshHome "dsh-runtimes") -Recurse -Filter "pnpm.cjs" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($found) { $pnpmCjs = $found.FullName }
 }
+if (-not (Test-Path $pnpmCjs)) { $pnpmCjs = "" }
 Write-Ok "node：$nodeExe"
-if ($pnpmCjs) { Write-Ok "pnpm：$pnpmCjs" } else { Write-Warn "未找到 pnpm，稍后可能需要手动安装依赖" }
+if ($pnpmCjs -and (Test-Path $pnpmCjs)) { Write-Ok "pnpm：$pnpmCjs" } else { $pnpmCjs = ""; Write-Warn "未找到 pnpm，跳过依赖安装（不影响插件本身，插件无 npm 依赖）" }
 
 # ---------- 3. 备份并改写 profile/package.json ----------
 $packageFile = Join-Path $profileDir "package.json"
@@ -217,7 +218,7 @@ if ($DryRun) {
 }
 
 # ---------- 4. pnpm install ----------
-if ($pnpmCjs) {
+if ($pnpmCjs -and (Test-Path $pnpmCjs)) {
     if ($DryRun) {
         Write-Ok "（演练）node pnpm.cjs install（在 $profileDir）"
     } else {
