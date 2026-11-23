@@ -38,6 +38,8 @@ git clone https://github.com/neigjborFrank/dsh-cloud-sync-tools.git C:\Users\<�
 
 > 私密仓库需要提前创建并配置好本机访问凭据（SSH key 或 HTTPS 凭据）。插件不调用平台 API。
 
+**卸载**：`node tools/v2/uninstall.mjs`（从 DSH profile 移除插件，保留私有仓库配置；加 `--purge-data` 连配置一起删）。
+
 ## 云端数据布局
 
 ```
