@@ -1,6 +1,9 @@
 // 辅助路由：健康检查 / 目录选择 / 工作区管理（从 routes.js 拆分，保持文件规模约束）
+import fs from "node:fs";
+import path from "node:path";
+
 import { AppError } from "../shared.js";
-import { readRegistry, removeWorkspaces } from "../core/registry.js";
+import { readRegistry, registerWorkspace, removeWorkspaces } from "../core/registry.js";
 import { pickFolderWindows, windowsPickerAvailable } from "./folder-picker.js";
 import { PLUGIN_VERSION, getService } from "./services.js";
 
@@ -90,6 +93,22 @@ export function createExtraRoutes(ctx) {
 					windowsPicker: process.platform === "win32" && windowsPickerAvailable(),
 				},
 			};
+		},
+
+		"POST /api/workspaces/register": async (body) => {
+			const target = typeof body.path === "string" ? body.path.trim() : "";
+			if (!target || !path.isAbsolute(target)) throw new AppError("bad-request", "请提供工作区绝对路径");
+			if (!fs.existsSync(target)) throw new AppError("path-missing", `目录不存在：${target}`);
+			const title = typeof body.title === "string" && body.title.trim() ? body.title.trim() : path.basename(target) || "workspace";
+			const workspaceRegistry = getService(ctx, "workspaceRegistry");
+			if (workspaceRegistry && typeof workspaceRegistry.create === "function") {
+				let record = null;
+				if (typeof workspaceRegistry.resolveByPath === "function") record = workspaceRegistry.resolveByPath(target) || null;
+				if (!record) record = await workspaceRegistry.create(target, title);
+				return { ok: true, mode: "official", existing: Boolean(record), workspace: record ? { id: record.id || "", title: record.title || title, path: target } : null };
+			}
+			const fallback = registerWorkspace(target, title, []);
+			return { ok: Boolean(fallback.ok), mode: "file", existing: Boolean(fallback.updated), workspace: fallback.ok ? { id: fallback.workspaceId || "", title, path: target } : null, output: fallback.ok ? "已写入注册表（DSH 需刷新/重启）" : fallback.error };
 		},
 
 		"POST /api/pick-directory": async (body) => {

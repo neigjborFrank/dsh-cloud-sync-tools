@@ -213,6 +213,13 @@ if (targetWorkspace) {
 	);
 }
 
+// 登记已有工作区（用于修复/兜底）
+const registerResult = await post("/api/workspaces/register", { path: downloadRoot, title: "登记测试工作区" });
+const workspacesRegistered = await call("/api/workspaces");
+const registeredRow = (workspacesRegistered.workspaces || []).find((workspace) => workspace.path === downloadRoot);
+check("Z5 可登记已有工作区", registerResult.ok === true && Boolean(registeredRow), JSON.stringify({ mode: registerResult.mode, id: registeredRow && registeredRow.id }));
+if (registeredRow) await post("/api/workspaces/remove", { ids: [registeredRow.id] });
+
 // 推送与历史
 const remoteLog = execFileSync("git", ["log", "--oneline", "-1", "main"], { cwd: remote, encoding: "utf8" }).trim();
 check("G1 已推送到远端", remoteLog.length > 0, remoteLog);
