@@ -2,9 +2,10 @@
 //
 // DSH 插件生命周期约束（旧版插件即如此）：
 //  1. apply 必须是同步函数、返回 void，并在同步阶段注册 ctx.effect；
-//  2. 不能在 await 之后注册 effect（会报 cannot create effect on inactive context，
-//     触发 DSH 的"禁用第三方插件"恢复，导致插件被移出 profile）；
-//  3. HTTP 服务异步启动；失败只记录日志，不向宿主抛错。
+//  2. 不能在 await 之后注册 effect（会报 cannot create effect on inactive context）；
+//  3. 未声明 inject 的服务不能直接读属性（否则插件加载报
+//     "cannot get property xxx without inject"）；用 ctx.get() 安全获取；
+//  4. HTTP 服务异步启动；失败只记录日志，不向宿主抛错。
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,10 +23,22 @@ export function whenReady() {
 	return readyPromise || Promise.resolve(null);
 }
 
+/** 安全获取可选服务：未声明 inject 时不能直接读属性，只能用 ctx.get() */
+function getService(ctx, name) {
+	try {
+		if (ctx && typeof ctx.get === "function") return ctx.get(name) || undefined;
+	} catch {
+		/* 服务不可用（例如未 inject）时返回 undefined，由调用方降级 */
+	}
+	return undefined;
+}
+
 export function apply(ctx, config = {}) {
 	trace(`apply called (repoRoot config=${config.workspace || "(default)"}, port=${config.port || "(default)"})`);
 	const repoRoot = config.workspace ? path.resolve(config.workspace) : path.resolve(here, "..");
 	const port = Number(config.port) || 8732;
+	const workspaceRegistry = getService(ctx, "workspaceRegistry");
+	const directoryPicker = getService(ctx, "directoryPicker");
 
 	let server = null;
 	let closed = false;
@@ -41,16 +54,14 @@ export function apply(ctx, config = {}) {
 		} catch (error) {
 			trace(`effect register failed: ${error && error.stack ? error.stack : error}`);
 		}
-	} else {
-		trace("ctx.effect unavailable");
 	}
 
 	// 异步启动 HTTP 服务；返回 Promise 供工具等待，不返回给 DSH（apply 保持 void）
 	readyPromise = startServer({
 		repoRoot,
 		port,
-		workspaceRegistry: ctx && ctx.workspaceRegistry,
-		directoryPicker: ctx && ctx.directoryPicker,
+		workspaceRegistry,
+		directoryPicker,
 	})
 		.then((started) => {
 			server = started;

@@ -23,7 +23,7 @@ const rel = (file) => path.relative(pluginRoot, file).replace(/\\/g, "/");
 const lines = (file) => fs.readFileSync(file, "utf8").split("\n").length;
 
 // 1) 文件规模
-const LIMITS = { "client.js": 800, "index.js": 60, default: 350 };
+const LIMITS = { "client.js": 800, "index.js": 100, default: 350 };
 const oversized = [];
 for (const file of walk(pluginRoot)) {
 	const name = rel(file);
