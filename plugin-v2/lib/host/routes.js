@@ -8,19 +8,14 @@ import { downloadWorkspace } from "../core/download.js";
 import { commitAndPush, ensureAttributes, ensureGitConfig, ensureLfs, pullFastForward } from "../core/git.js";
 import { uploadWorkspace } from "../core/merge.js";
 import { findProject, listProjects } from "../core/project.js";
-import { pickFolderWindows, windowsPickerAvailable } from "./folder-picker.js";
 import { addRepo, defaultRepo, findRepo, listBindings, listRepos, publicRepos, removeRepo, setBinding } from "../core/repo.js";
 import { registerWorkspace, repairRegistry, validateRegistry, readRegistry } from "../core/registry.js";
 import { downloadSession, listCloudSessions, listSessions, uploadSession } from "../core/session.js";
+import { createExtraRoutes } from "./routes-extra.js";
+import { getService } from "./services.js";
 import { buildCloudView, buildTree } from "./views.js";
 
-const PLUGIN_VERSION = (() => {
-	try {
-		return JSON.parse(fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version || "0.0.0";
-	} catch {
-		return "0.0.0";
-	}
-})();
+
 
 const requireRepo = (ctx, repoId) => {	const repo = repoId ? findRepo(repoId) : defaultRepo();
 	if (!repo) throw new AppError("no-repo", "还没有登记同步仓库：请先在「仓库管理…」登记你的私有仓库");
@@ -57,48 +52,11 @@ const resolveDownloadBase = (ctxValue) => {
 /** 云端项目名形如 `标题__路径键`，取标题作为默认文件夹名 */
 const friendlyProjectTitle = (projectNameValue) => sanitizeFolderName(String(projectNameValue || "").split("__")[0]);
 
-/** 通过 DSH directoryPicker 服务选择目录（native / browse / 旧版兼容） */
-async function pickWithDshPicker(ctx, body = {}, probeOnly = false) {
-	const picker = ctx.directoryPicker;
-	if (!picker) {
-		return { available: false, kind: "none", hint: "当前环境没有目录选择服务，可在下载对话框直接编辑路径（默认目录已自动填充）" };
-	}
-	try {
-		const capability = typeof picker.capability === "function" ? picker.capability() : null;
-		if (capability && capability.kind === "native" && typeof capability.pick === "function") {
-			if (probeOnly) return { available: true, kind: "native" };
-			const controller = new AbortController();
-			const timer = setTimeout(() => controller.abort(), 180000);
-			try {
-				const selected = await capability.pick(controller.signal);
-				return { available: true, kind: "native", path: selected || "", canceled: !selected };
-			} finally {
-				clearTimeout(timer);
-			}
-		}
-		if (capability && capability.kind === "browse") {
-			return {
-				available: false,
-				kind: "browse",
-				hint: "当前环境使用应用内目录浏览器；默认目录已自动填充，可直接编辑路径",
-			};
-		}
-		// 兼容旧版目录选择服务
-		if (typeof picker.pickDirectory === "function") {
-			const picked = await picker.pickDirectory({ title: "选择下载位置" });
-			const selected = typeof picked === "string" ? picked : picked && picked.path ? picked.path : "";
-			return { available: true, kind: "legacy", path: selected, canceled: !selected };
-		}
-		return { available: false, kind: capability ? capability.kind : "unknown" };
-	} catch (error) {
-		return { available: true, kind: "native", path: "", canceled: false, error: error.message || String(error) };
-	}
-}
+
 
 export function createRoutes(ctx) {
 	return {
-		"GET /api/health": () => ({ ok: true, service: "cloud-sync", version: PLUGIN_VERSION, repoRoot: ctx.repoRoot }),
-
+		...createExtraRoutes(ctx),
 		"GET /api/repos": () => ({
 			repos: publicRepos(),
 			bindings: listBindings(),
@@ -252,13 +210,28 @@ export function createRoutes(ctx) {
 
 			let registration = null;
 			if (withWorkspace || downloaded.length) {
-				const title = path.basename(targetDir) || "workspace";
+				const projectInfo = findProject(repo.path, projectNameValue);
+				const title = (projectInfo && projectInfo.title) || friendlyProjectTitle(projectNameValue);
 				try {
-					if (ctx.workspaceRegistry && typeof ctx.workspaceRegistry.create === "function") {
-						await ctx.workspaceRegistry.create(targetDir, title);
-						registration = { mode: "official", ok: true };
+					const workspaceRegistry = getService(ctx, "workspaceRegistry");
+					let workspaceRecord = null;
+					if (workspaceRegistry && typeof workspaceRegistry.resolveByPath === "function") {
+						workspaceRecord = workspaceRegistry.resolveByPath(targetDir) || null;
+					}
+					if (!workspaceRecord && workspaceRegistry && typeof workspaceRegistry.create === "function") {
+						workspaceRecord = await workspaceRegistry.create(targetDir, title);
+					}
+					if (workspaceRecord) {
+						registration = { mode: "official", ok: true, workspaceId: workspaceRecord.id || null, title };
+						lines.push(`已通过 DSH 官方服务登记工作区：${title}`);
 					} else {
-						registration = { mode: "file", ...registerWorkspace(targetDir, title, downloaded.map((item) => item.id)) };
+						const fallback = registerWorkspace(targetDir, title, downloaded.map((item) => item.id));
+						registration = { mode: "file", ...fallback, title };
+						lines.push(
+							fallback.ok
+								? `已写入工作区注册表（当前 DSH 会话中可能需刷新/重启后可见）：${title}`
+								: `⚠ 工作区登记失败：${fallback.error || "未知错误"}`,
+						);
 					}
 				} catch (error) {
 					registration = { mode: "failed", ok: false, error: error.message };
@@ -276,29 +249,6 @@ export function createRoutes(ctx) {
 				targetDir,
 				project: projectNameValue,
 			};
-		},
-
-		"POST /api/pick-directory": async (body) => {
-			const probeOnly = Boolean(body && body.probe === true);
-			const preferDsh = Boolean(body && body.useDshNative === true) || process.platform !== "win32";
-
-			// Windows：默认使用系统标准的"浏览文件夹"对话框（PowerShell FolderBrowserDialog）
-			if (!preferDsh && windowsPickerAvailable()) {
-				if (probeOnly) return { available: true, kind: "windows" };
-				const picked = await pickFolderWindows({ title: "选择下载位置" });
-				if (picked.ok) return { available: true, kind: "windows", path: picked.path, canceled: picked.canceled };
-				// Windows 选择框失败时退回 DSH 能力
-				const fallback = await pickWithDshPicker(ctx, body, false);
-				if (fallback.available && !fallback.error) return fallback;
-				return {
-					available: true,
-					kind: "windows",
-					path: "",
-					canceled: false,
-					error: picked.error || (fallback && fallback.error) || "打开系统选择框失败",
-				};
-			}
-			return pickWithDshPicker(ctx, body, probeOnly);
 		},
 
 		"GET /api/registry-status": () => {

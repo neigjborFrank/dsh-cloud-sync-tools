@@ -23,12 +23,12 @@ export function whenReady() {
 	return readyPromise || Promise.resolve(null);
 }
 
-/** 安全获取可选服务：未声明 inject 时不能直接读属性，只能用 ctx.get() */
-function getService(ctx, name) {
+/** 安全获取可选服务：未声明 inject 时不能直接读属性，只能用 ctx.get()；每次调用时解析（服务可能晚于插件加载） */
+function resolveService(ctx, name) {
 	try {
 		if (ctx && typeof ctx.get === "function") return ctx.get(name) || undefined;
 	} catch {
-		/* 服务不可用（例如未 inject）时返回 undefined，由调用方降级 */
+		/* 服务不可用时返回 undefined，由调用方降级 */
 	}
 	return undefined;
 }
@@ -37,8 +37,6 @@ export function apply(ctx, config = {}) {
 	trace(`apply called (repoRoot config=${config.workspace || "(default)"}, port=${config.port || "(default)"})`);
 	const repoRoot = config.workspace ? path.resolve(config.workspace) : path.resolve(here, "..");
 	const port = Number(config.port) || 8732;
-	const workspaceRegistry = getService(ctx, "workspaceRegistry");
-	const directoryPicker = getService(ctx, "directoryPicker");
 
 	let server = null;
 	let closed = false;
@@ -56,12 +54,11 @@ export function apply(ctx, config = {}) {
 		}
 	}
 
-	// 异步启动 HTTP 服务；返回 Promise 供工具等待，不返回给 DSH（apply 保持 void）
+	// 异步启动 HTTP 服务；服务按需惰性解析（workspaceRegistry/directoryPicker 可能稍后才就绪）
 	readyPromise = startServer({
 		repoRoot,
 		port,
-		workspaceRegistry,
-		directoryPicker,
+		resolveService: (name) => resolveService(ctx, name),
 		downloadBase: config.downloadBase ? path.resolve(config.downloadBase) : undefined,
 	})
 		.then((started) => {

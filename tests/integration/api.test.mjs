@@ -198,6 +198,21 @@ check(
 	JSON.stringify({ ok: response.ok, targetDir: autoTarget }),
 );
 
+// 工作区列表 / 删除（官方服务不可用时走文件兜底）
+const workspacesBefore = await call("/api/workspaces");
+const workspaceList = workspacesBefore.workspaces || [];
+const targetWorkspace = workspaceList.find((workspace) => workspace.path === autoTarget);
+check("Z3 工作区列表可读取", workspacesBefore.ok === true && Array.isArray(workspaceList) && Boolean(targetWorkspace), JSON.stringify({ mode: workspacesBefore.mode, count: workspaceList.length }));
+if (targetWorkspace) {
+	const removeResult = await post("/api/workspaces/remove", { ids: [targetWorkspace.id] });
+	const workspacesAfter = await call("/api/workspaces");
+	check(
+		"Z4 工作区可删除（兜底模式）",
+		removeResult.ok === true && !(workspacesAfter.workspaces || []).some((workspace) => workspace.id === targetWorkspace.id),
+		JSON.stringify({ mode: removeResult.mode, output: removeResult.output }),
+	);
+}
+
 // 推送与历史
 const remoteLog = execFileSync("git", ["log", "--oneline", "-1", "main"], { cwd: remote, encoding: "utf8" }).trim();
 check("G1 已推送到远端", remoteLog.length > 0, remoteLog);

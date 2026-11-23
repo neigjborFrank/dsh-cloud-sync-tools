@@ -147,6 +147,35 @@ export function repairRegistry(file = registryPath()) {
 }
 
 /**
+ * 从注册表删除若干工作区（官方 workspaceRegistry 不可用时的兜底路径）。
+ * 调用方需提示用户刷新/重启 DSH 才会反映到界面。
+ */
+export function removeWorkspaces(ids = [], file = registryPath()) {
+	const json = readRegistry(file);
+	if (!json) return { ok: false, removed: [], error: "找不到 workspace.json" };
+	const table = (json.tables && json.tables.workspaces) || {};
+	const targets = new Set(ids.map(String));
+	const removed = [];
+	for (const id of targets) {
+		if (table[id]) {
+			delete table[id];
+			removed.push(id);
+		}
+	}
+	if (!removed.length) return { ok: true, removed, changed: false };
+	json.global ||= {};
+	json.global.workspaceIds = (json.global.workspaceIds || []).filter((id) => table[id]);
+	if (json.global.defaultWorkspaceId && !table[json.global.defaultWorkspaceId]) {
+		json.global.defaultWorkspaceId = json.global.workspaceIds[0] || null;
+	}
+	const check = validateRegistry(json);
+	if (!check.ok) return { ok: false, removed: [], error: "删除后校验失败，已放弃写入", problems: check.problems };
+	const backupFile = backup(file);
+	writeJsonAtomic(file, json);
+	return { ok: true, removed, changed: true, backup: backupFile };
+}
+
+/**
  * 回退路径：直接登记一个工作区（DSH 官方服务不可用时使用）。
  * 保证：同路径复用、会话从其它 workspace 解绑、写后校验、失败回滚。
  */
