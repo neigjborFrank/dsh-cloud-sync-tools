@@ -41,7 +41,7 @@ git clone https://github.com/neigjborFrank/dsh-cloud-sync-tools.git C:\Users\<�
 
 > 私密仓库需要提前创建并配置好本机访问凭据（SSH key 或 HTTPS 凭据）。插件不调用平台 API。
 
-**多设备同步**：上传/下载前会自动 `git pull --ff-only`；「云端与同步…」里也有「拉取远端」按钮。若本地与远端分叉或工作区有未提交改动，插件只告警不自动合并，需手动处理。
+**多设备同步**：打开「云端与同步…」、上传/下载对话框时都会**自动 `git pull --ff-only` 更新云端状态**（视图头部有「同步云端」按钮）；上传/下载前也会自动拉取。若本地与远端分叉或工作区有未提交改动，插件只告警不自动合并，需手动处理。
 
 **下载位置**：默认下载到 `%USERPROFILE%\Documents\deepseek-harness\workspaces\<项目名>`，目录不存在时自动创建；下载对话框点「选择文件夹…」会弹出 Windows 标准的"浏览文件夹"窗口，也可留空直接使用默认目录。
 
@@ -81,7 +81,7 @@ node --test tests/unit/core.test.mjs
 node --test tests/unit/session_repo.test.mjs
 node --test tests/unit/client_static.test.mjs
 
-# 集成测试（39 项，使用真实 git 仓库与 bare 远端；不会碰真实 DSH 数据；含 CORS 预检、多设备拉取、默认目录、目录选择、会话迁移清理回归）
+# 集成测试（40 项，使用真实 git 仓库与 bare 远端；不会碰真实 DSH 数据；含 CORS 预检、多设备拉取、默认目录、目录选择、会话迁移清理、自动同步回归）
 node tests/integration/api.test.mjs <仓库根>/plugin-v2 <临时目录> 8910
 
 # 全新环境端到端（14 项：私有仓库地址配置 → 上传 → 新设备克隆下载）

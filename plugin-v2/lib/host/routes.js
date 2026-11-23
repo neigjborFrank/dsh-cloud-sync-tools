@@ -106,6 +106,30 @@ export function createRoutes(ctx) {
 
 		"GET /api/cloud-view": async () => buildCloudView(listRepos()),
 
+		// 自动更新云端状态：fast-forward 拉取所有仓库后，返回最新 tree + cloudView（供"同步"点击时调用）
+		"POST /api/sync-status": async () => {
+			const all = listRepos();
+			const repos = all.filter((repo) => repo.ok);
+			const lines = [];
+			const results = [];
+			for (const repo of repos) {
+				await ensureGitConfig(repo.path);
+				const pull = await pullFastForward(repo.path);
+				results.push({ repoId: repo.id, name: repo.name, ok: pull.ok, updated: pull.updated, before: pull.before, after: pull.after });
+				lines.push(`${repo.name}：${pullMessage(pull)}`);
+			}
+			const tree = { ...buildTree(listRepos()), repos: publicRepos(), suggestedBase: resolveDownloadBase(ctx) };
+			const cloudView = await buildCloudView(listRepos());
+			return {
+				ok: true,
+				changed: results.some((item) => item.updated),
+				output: lines.join("\n") || "没有可用仓库",
+				results,
+				tree,
+				cloudView,
+			};
+		},
+
 		"GET /api/sessions": () => ({ ok: true, sessions: listSessions() }),
 
 		"POST /api/upload-project": async (body) => {

@@ -230,6 +230,14 @@ check("G1 已推送到远端", remoteLog.length > 0, remoteLog);
 const headTree = execFileSync("git", ["ls-tree", "-r", "--name-only", "main"], { cwd: remote, encoding: "utf8" });
 check("G2 远端提交包含 store/index", headTree.includes("store/") && headTree.includes("index/projects/"));
 
+// 自动更新云端状态：一次调用完成 fast-forward 拉取 + 返回最新 tree/cloudView
+const syncStatus = await post("/api/sync-status", {});
+check(
+	"S1 同步云端状态返回最新数据",
+	syncStatus.ok === true && Boolean(syncStatus.tree) && Boolean(syncStatus.cloudView) && Array.isArray(syncStatus.cloudView.projects),
+	JSON.stringify({ changed: syncStatus.changed, output: String(syncStatus.output || "").split("\n")[0] }),
+);
+
 // 多设备：另一台设备把新项目/会话推送到远端 → 本机拉取后应可见并可下载
 const deviceB = path.join(base, "deviceB");
 execFileSync("git", ["-c", "core.longpaths=true", "clone", "--quiet", "--branch", "main", remote, deviceB], { stdio: ["ignore", "ignore", "ignore"] });

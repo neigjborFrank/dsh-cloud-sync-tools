@@ -203,6 +203,19 @@ window.__ModuleLoader__.load({
 				};
 				const postJson = (apiPath, body) =>
 					call(apiPath, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+				// 自动更新云端状态：fast-forward 拉取远端仓库，同时拿到最新 tree/cloudView
+				const syncCloudState = async () => {
+					try {
+						const result = await postJson("/api/sync-status", {});
+						if (result.tree) treeCache = result.tree;
+						return { ok: true, changed: Boolean(result.changed), output: String(result.output || ""), data: result };
+					} catch (error) {
+						try {
+							treeCache = await call("/api/tree");
+						} catch {}
+						return { ok: false, changed: false, output: `自动同步失败（使用本地缓存）：${error.message || error}`, data: null };
+					}
+				};
 				const showDown = (error) => {
 					const detail = error ? `（${error.message || error}）` : "";
 					setNote(`连不上 ${HOSTS[0]}${detail}\n服务由插件宿主内置提供，请重启 DSH`, true);
@@ -597,7 +610,7 @@ window.__ModuleLoader__.load({
 					picker.hidden = false;
 					const noRepo = (data.repos || []).filter((repo) => repo.ok).length === 0;
 					picker.innerHTML =
-						`<div class="dsh-csp-head"><span>云端与同步</span><button class="dsh-csp-mini" data-pull="1">拉取远端</button><button class="dsh-csp-mini" data-refresh="1">刷新</button></div>` +
+						`<div class="dsh-csp-head"><span>云端与同步</span><button class="dsh-csp-mini" data-sync="1">同步云端</button><button class="dsh-csp-mini" data-refresh="1">刷新</button></div>` +
 						(noRepo
 							? `<div class="dsh-csp-cv-repo">还没有登记同步仓库。请先在「仓库管理…」登记你自己的私有仓库。</div>` +
 								`<div class="dsh-csp-foot"><button class="go" data-goto-repos="1">去登记仓库</button></div>`
@@ -607,21 +620,17 @@ window.__ModuleLoader__.load({
 					if (gotoRepos) gotoRepos.onclick = () => void showRepos();
 					const refresh = picker.querySelector("[data-refresh]");
 					if (refresh) refresh.onclick = () => void showCloudView(expanded);
-					const pullBtn = picker.querySelector("[data-pull]");
-					if (pullBtn) {
-						pullBtn.onclick = async () => {
-							if (pullBtn.dataset.busy) return;
-							pullBtn.dataset.busy = "1";
-							pullBtn.textContent = "拉取中…";
+					const syncBtn = picker.querySelector("[data-sync]");
+					if (syncBtn) {
+						syncBtn.onclick = async () => {
+							if (syncBtn.dataset.busy) return;
+							syncBtn.dataset.busy = "1";
+							syncBtn.textContent = "同步中…";
 							try {
-								setNote("正在拉取远端更新…");
-								const result = await postJson("/api/repos/pull", {});
-								setNote(String(result.output || "").split("\n").slice(-6).join("\n"), !result.ok);
 								await showCloudView(expanded);
-							} catch (error) {
-								setNote("拉取失败：" + (error.message || error), true);
-								pullBtn.textContent = "拉取远端";
-								delete pullBtn.dataset.busy;
+							} finally {
+								syncBtn.textContent = "同步云端";
+								delete syncBtn.dataset.busy;
 							}
 						};
 					}
@@ -640,13 +649,15 @@ window.__ModuleLoader__.load({
 					const set = expanded || new Set();
 					menu.style.width = "340px";
 					picker.hidden = false;
-					picker.innerHTML = '<div class="dsh-csp-head"><span>正在读取云端…</span></div>';
+					picker.innerHTML = '<div class="dsh-csp-head"><span>正在同步云端状态…</span></div>';
 					place();
 					try {
-						const data = await call("/api/cloud-view");
+						const sync = await syncCloudState();
+						const data = sync.data && sync.data.cloudView ? sync.data.cloudView : await call("/api/cloud-view");
 						if (!expanded) for (const project of data.projects || []) set.add(project.name);
 						renderCloudView(data, set);
-						setNote("");
+						if (!sync.ok) setNote(sync.output, true);
+						else setNote(sync.changed ? "云端状态已自动更新（拉取到新提交）" : "云端状态已是最新", false);
 					} catch (error) {
 						picker.hidden = true;
 						showDown(error);
@@ -656,10 +667,13 @@ window.__ModuleLoader__.load({
 				// ---------- 菜单开关 ----------
 				const openPicker = async (mode) => {
 					picker.hidden = false;
-					picker.innerHTML = '<div class="dsh-csp-head"><span>读取项目…</span></div>';
+					picker.innerHTML = '<div class="dsh-csp-head"><span>正在同步云端状态…</span></div>';
 					try {
-						treeCache = await call("/api/tree");
+						const sync = await syncCloudState();
+						treeCache = sync.data && sync.data.tree ? sync.data.tree : await call("/api/tree");
 						renderTree(mode);
+						if (!sync.ok) setNote(sync.output, true);
+						else if (sync.changed) setNote("已自动同步云端状态（拉取到新提交）", false);
 					} catch (error) {
 						picker.hidden = true;
 						showDown(error);
