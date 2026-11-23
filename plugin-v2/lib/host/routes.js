@@ -1,12 +1,13 @@
 // HTTP 路由：所有业务接口（v2）。handler 返回对象，由 server 统一 JSON 输出。
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { AppError } from "../shared.js";
 import { downloadWorkspace } from "../core/download.js";
 import { commitAndPush, ensureAttributes, ensureGitConfig, ensureLfs, pullFastForward } from "../core/git.js";
 import { uploadWorkspace } from "../core/merge.js";
-import { listProjects } from "../core/project.js";
+import { findProject, listProjects } from "../core/project.js";
 import { addRepo, defaultRepo, findRepo, listBindings, listRepos, publicRepos, removeRepo, setBinding } from "../core/repo.js";
 import { registerWorkspace, repairRegistry, validateRegistry, readRegistry } from "../core/registry.js";
 import { downloadSession, listCloudSessions, listSessions, uploadSession } from "../core/session.js";
@@ -35,6 +36,25 @@ const pullMessage = (result) => {
 	const reason = (result.error || result.output || "未知错误").split("\n").filter(Boolean)[0] || "未知错误";
 	return `⚠ 拉取远端失败（继续使用本地数据）：${reason}`;
 };
+
+/** 默认下载根目录：用户未指定时，工作区自动创建在 <Documents>/deepseek-harness/workspaces 下 */
+const DEFAULT_DOWNLOAD_BASE = path.join(os.homedir(), "Documents", "deepseek-harness", "workspaces");
+
+const sanitizeFolderName = (value) => {
+	const cleaned = String(value || "")
+		.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+		.replace(/[.\s]+$/g, "")
+		.trim();
+	return cleaned && cleaned !== "." && cleaned !== ".." ? cleaned.slice(0, 80) : "workspace";
+};
+
+const resolveDownloadBase = (ctxValue) => {
+	const configured = ctxValue && ctxValue.downloadBase;
+	return configured ? path.resolve(configured) : DEFAULT_DOWNLOAD_BASE;
+};
+
+/** 云端项目名形如 `标题__路径键`，取标题作为默认文件夹名 */
+const friendlyProjectTitle = (projectNameValue) => sanitizeFolderName(String(projectNameValue || "").split("__")[0]);
 
 export function createRoutes(ctx) {
 	return {
@@ -83,7 +103,7 @@ export function createRoutes(ctx) {
 
 		"GET /api/tree": () => {
 			const repos = listRepos();
-			return { ...buildTree(repos), repos: publicRepos(), suggestedBase: ctx.workspaceBase || "" };
+			return { ...buildTree(repos), repos: publicRepos(), suggestedBase: resolveDownloadBase(ctx) };
 		},
 
 		"GET /api/cloud-view": async () => buildCloudView(listRepos()),
@@ -147,8 +167,18 @@ export function createRoutes(ctx) {
 			const projectNameValue = typeof body.name === "string" ? body.name : "";
 			const targetDirRaw = typeof body.targetDir === "string" ? body.targetDir.trim() : "";
 			if (!projectNameValue) throw new AppError("bad-request", "缺少项目名称");
-			if (!targetDirRaw || !path.isAbsolute(targetDirRaw)) throw new AppError("bad-target", "请选择有效的目标目录");
-			const targetDir = path.resolve(targetDirRaw);
+			const base = resolveDownloadBase(ctx);
+			let targetDir;
+			if (!targetDirRaw) {
+				// 未指定目录：自动在默认目录下创建以项目命名的文件夹
+				targetDir = path.join(base, friendlyProjectTitle(projectNameValue));
+			} else if (path.isAbsolute(targetDirRaw)) {
+				targetDir = path.resolve(targetDirRaw);
+			} else {
+				// 相对路径：相对默认下载目录解析
+				targetDir = path.resolve(base, targetDirRaw);
+			}
+			fs.mkdirSync(targetDir, { recursive: true });
 			const withWorkspace = body.withWorkspace !== false;
 			const ids = Array.isArray(body.sessionIds) ? [...new Set(body.sessionIds)] : [];
 
@@ -209,16 +239,39 @@ export function createRoutes(ctx) {
 			};
 		},
 
-		"POST /api/pick-directory": async () => {
-			if (ctx.directoryPicker && typeof ctx.directoryPicker.pickDirectory === "function") {
-				try {
-					const picked = await ctx.directoryPicker.pickDirectory({ title: "选择下载位置" });
-					return { available: true, path: typeof picked === "string" ? picked : picked && picked.path ? picked.path : "" };
-				} catch {
-					return { available: false };
+		"POST /api/pick-directory": async (body) => {
+			const picker = ctx.directoryPicker;
+			if (!picker) return { available: false, kind: "none", hint: "当前环境没有目录选择服务，可在下载对话框直接编辑路径" };
+			try {
+				const capability = typeof picker.capability === "function" ? picker.capability() : null;
+				if (capability && capability.kind === "native" && typeof capability.pick === "function") {
+					if (body && body.probe === true) return { available: true, kind: "native" };
+					const controller = new AbortController();
+					const timer = setTimeout(() => controller.abort(), 180000);
+					try {
+						const selected = await capability.pick(controller.signal);
+						return { available: true, kind: "native", path: selected || "", canceled: !selected };
+					} finally {
+						clearTimeout(timer);
+					}
 				}
+				if (capability && capability.kind === "browse") {
+					return {
+						available: false,
+						kind: "browse",
+						hint: "当前环境使用应用内目录浏览器；默认目录已自动填充，可直接编辑路径",
+					};
+				}
+				// 兼容旧版目录选择服务
+				if (typeof picker.pickDirectory === "function") {
+					const picked = await picker.pickDirectory({ title: "选择下载位置" });
+					const selected = typeof picked === "string" ? picked : picked && picked.path ? picked.path : "";
+					return { available: true, kind: "legacy", path: selected, canceled: !selected };
+				}
+				return { available: false, kind: capability ? capability.kind : "unknown" };
+			} catch (error) {
+				return { available: true, kind: "native", path: "", canceled: false, error: error.message || String(error) };
 			}
-			return { available: false };
 		},
 
 		"GET /api/registry-status": () => {

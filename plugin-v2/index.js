@@ -62,6 +62,7 @@ export function apply(ctx, config = {}) {
 		port,
 		workspaceRegistry,
 		directoryPicker,
+		downloadBase: config.downloadBase ? path.resolve(config.downloadBase) : undefined,
 	})
 		.then((started) => {
 			server = started;

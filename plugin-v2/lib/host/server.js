@@ -56,9 +56,9 @@ function readBody(request) {
  * 启动本地 HTTP 服务（仅回环地址）。
  * @returns {Promise<{port:number, token:string, server:http.Server, close:()=>Promise<void>}>}
  */
-export async function startServer({ repoRoot, port = 8732, workspaceRegistry, directoryPicker } = {}) {
+export async function startServer({ repoRoot, port = 8732, workspaceRegistry, directoryPicker, downloadBase } = {}) {
 	const token = randomBytes(16).toString("hex");
-	const routes = createRoutes({ repoRoot, workspaceRegistry, directoryPicker });
+	const routes = createRoutes({ repoRoot, workspaceRegistry, directoryPicker, downloadBase });
 
 	const server = http.createServer(async (request, response) => {
 		const url = new URL(request.url || "/", "http://127.0.0.1");

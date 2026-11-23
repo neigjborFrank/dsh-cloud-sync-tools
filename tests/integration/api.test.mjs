@@ -87,7 +87,7 @@ git(["commit", "-m", "init"]);
 
 const mod = await import(pathToFileURL(path.join(pluginDir, "index.js")).href);
 let dispose = null;
-mod.apply({ effect: (fn) => { dispose = fn(); } }, { workspace: repo, port });
+mod.apply({ effect: (fn) => { dispose = fn(); } }, { workspace: repo, port, downloadBase: path.join(base, "default-downloads") });
 const started = await mod.whenReady();
 const baseUrl = `http://127.0.0.1:${started.port}`;
 const token = (await fetch(baseUrl + "/token").then((r) => r.json())).token;
@@ -174,6 +174,21 @@ check("D3 下载校验通过", response.workspace && response.workspace.verified
 const dlSession = path.join(home, "sessions", projectKeyOf(downloadRoot), sidSub, "session.v4.jsonl.zstd");
 check("D4 会话下载并改写 cwd", fs.existsSync(dlSession) && readHeader(dlSession).cwd === downloadRoot);
 check("D5 工作区登记", response.registration && response.registration.ok === true, JSON.stringify(response.registration));
+
+// 默认下载目录：未指定 targetDir 时自动在默认根目录下创建项目文件夹
+const treeWithBase = await call("/api/tree");
+check(
+	"Z1 提供默认下载根目录",
+	treeWithBase.suggestedBase === path.join(base, "default-downloads"),
+	JSON.stringify(treeWithBase.suggestedBase),
+);
+response = await post("/api/download-project", { repoId, name: treeName, targetDir: "", sessionIds: [], withWorkspace: true });
+const autoTarget = response.targetDir || "";
+check(
+	"Z2 未指定目录时自动创建文件夹并下载",
+	response.ok === true && autoTarget.startsWith(path.join(base, "default-downloads")) && fs.existsSync(path.join(autoTarget, "proj", "sub", "b.txt")),
+	JSON.stringify({ ok: response.ok, targetDir: autoTarget }),
+);
 
 // 推送与历史
 const remoteLog = execFileSync("git", ["log", "--oneline", "-1", "main"], { cwd: remote, encoding: "utf8" }).trim();

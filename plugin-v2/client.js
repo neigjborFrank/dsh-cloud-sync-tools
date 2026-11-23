@@ -351,39 +351,22 @@ window.__ModuleLoader__.load({
 
 				// ---------- 下载 ----------
 				const suggestedTarget = (project) => {
-					const parent = (treeCache && treeCache.suggestedBase) || "";
-					const name = project.title || project.name || "workspace";
-					return parent ? `${parent}\\${name}` : name;
+					const base = (treeCache && treeCache.suggestedBase) || "";
+					const rawTitle = project.title || (project.name || "workspace").split("__")[0] || "workspace";
+					const safe = String(rawTitle).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").trim() || "workspace";
+					return base ? `${base}\\${safe}` : safe;
 				};
 
 				const showDownloadDialog = async (project, ids) => {
-					let target = "";
-					let available = true;
-					setNote("正在打开文件夹选择框…");
-					try {
-						const picked = await postJson("/api/pick-directory", {});
-						if (picked.canceled) {
-							setNote("");
-							return;
-						}
-						if (picked.ok && picked.path) target = picked.path;
-						else if (picked.available === false) {
-							available = false;
-							target = suggestedTarget(project);
-						} else {
-							setNote("打开文件夹选择框失败：" + (picked.error || ""), true);
-							return;
-						}
-					} catch {
-						available = false;
-						target = suggestedTarget(project);
-					}
-					setNote(available ? "" : "当前环境没有系统选择框，请直接编辑路径", false);
+					// 不再自动弹系统选择框；默认目录已预填，留空则由服务端自动创建
+					const target = suggestedTarget(project);
+					const base = (treeCache && treeCache.suggestedBase) || "";
 
 					picker.hidden = false;
 					picker.innerHTML =
-						`<div class="dsh-csp-head"><span>下载到</span><button class="dsh-csp-mini" data-browse="1">重新选择…</button></div>` +
-						`<div class="dsh-csp-input"><input id="csp-target" value="${escapeHtml(target)}"></div>` +
+						`<div class="dsh-csp-head"><span>下载到</span><button class="dsh-csp-mini" data-browse="1">选择文件夹…</button></div>` +
+						`<div class="dsh-csp-input"><input id="csp-target" value="${escapeHtml(target)}" placeholder="留空则自动在默认目录创建"></div>` +
+						`<div class="dsh-csp-cv-repo">默认目录：${escapeHtml(base || "(未配置)")}<br>目录不存在时会自动创建；留空则按项目名创建子文件夹。</div>` +
 						`<div class="dsh-csp-sess"><input type="checkbox" id="csp-with" checked>` +
 						`<span class="n"><b>同时下载工作区</b><span>并自动登记为新工作区（推荐）</span></span></div>` +
 						`<div class="dsh-csp-sess"><input type="checkbox" id="csp-pull" checked>` +
@@ -394,10 +377,23 @@ window.__ModuleLoader__.load({
 					const withBox = picker.querySelector("#csp-with");
 					const pullBox = picker.querySelector("#csp-pull");
 					picker.querySelector("[data-browse]").onclick = async () => {
+						setNote("正在打开系统文件夹选择框…");
 						try {
 							const picked = await postJson("/api/pick-directory", {});
-							if (picked.ok && picked.path) input.value = picked.path;
-							else if (picked.available === false) setNote("当前环境没有系统选择框，请直接编辑路径", false);
+							if (picked.canceled) {
+								setNote("已取消选择");
+								return;
+							}
+							if (picked.path) {
+								input.value = picked.path;
+								setNote("已选择：" + picked.path);
+								return;
+							}
+							if (picked.available === false) {
+								setNote(picked.hint || "当前环境没有系统选择框，将使用默认目录自动创建", false);
+								return;
+							}
+							setNote("打开选择框失败：" + (picked.error || "未知错误"), true);
 						} catch (error) {
 							setNote("打开选择框失败：" + (error.message || error), true);
 						}
@@ -407,9 +403,8 @@ window.__ModuleLoader__.load({
 						setNote("");
 					};
 					picker.querySelector("[data-go]").onclick = () => {
-						const chosen = String(input.value || "").trim();
-						if (!chosen) return setNote("请选择下载位置", true);
-						void doDownload(project, ids, chosen, withBox.checked, pullBox.checked);
+						// 允许留空：服务端自动在默认目录下创建项目文件夹
+						void doDownload(project, ids, String(input.value || "").trim(), withBox.checked, pullBox.checked);
 					};
 					place();
 				};
@@ -427,6 +422,7 @@ window.__ModuleLoader__.load({
 								pull: pullRemote,
 							});
 							let text = String(result.output || "");
+							if (result.targetDir) text += `\n目标目录：${result.targetDir}`;
 							const pending = result.pendingLarge || [];
 							if (pending.length) {
 								text += `\n\n有 ${pending.length} 个大文件未能自动恢复：\n` + pending.slice(0, 5).map((item) => `${item.reason}：${item.path}`).join("\n");
