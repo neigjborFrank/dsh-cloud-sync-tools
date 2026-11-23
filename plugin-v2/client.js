@@ -386,10 +386,13 @@ window.__ModuleLoader__.load({
 						`<div class="dsh-csp-input"><input id="csp-target" value="${escapeHtml(target)}"></div>` +
 						`<div class="dsh-csp-sess"><input type="checkbox" id="csp-with" checked>` +
 						`<span class="n"><b>同时下载工作区</b><span>并自动登记为新工作区（推荐）</span></span></div>` +
+						`<div class="dsh-csp-sess"><input type="checkbox" id="csp-pull" checked>` +
+						`<span class="n"><b>先拉取远端更新</b><span>多设备时推荐：下载前同步远端最新提交</span></span></div>` +
 						`<div class="dsh-csp-foot"><button data-cancel="1">取消</button><button class="go" data-go="1">开始下载</button></div>`;
 
 					const input = picker.querySelector("#csp-target");
 					const withBox = picker.querySelector("#csp-with");
+					const pullBox = picker.querySelector("#csp-pull");
 					picker.querySelector("[data-browse]").onclick = async () => {
 						try {
 							const picked = await postJson("/api/pick-directory", {});
@@ -406,12 +409,12 @@ window.__ModuleLoader__.load({
 					picker.querySelector("[data-go]").onclick = () => {
 						const chosen = String(input.value || "").trim();
 						if (!chosen) return setNote("请选择下载位置", true);
-						void doDownload(project, ids, chosen, withBox.checked);
+						void doDownload(project, ids, chosen, withBox.checked, pullBox.checked);
 					};
 					place();
 				};
 
-				const doDownload = async (project, ids, targetDir, withWorkspace) => {
+				const doDownload = async (project, ids, targetDir, withWorkspace, pullRemote = true) => {
 					await busyRun(async () => {
 						setNote(withWorkspace ? "正在下载并镜像工作区…" : "正在下载会话…");
 						try {
@@ -421,6 +424,7 @@ window.__ModuleLoader__.load({
 								targetDir,
 								sessionIds: ids,
 								withWorkspace,
+								pull: pullRemote,
 							});
 							let text = String(result.output || "");
 							const pending = result.pendingLarge || [];
@@ -593,7 +597,7 @@ window.__ModuleLoader__.load({
 					picker.hidden = false;
 					const noRepo = (data.repos || []).filter((repo) => repo.ok).length === 0;
 					picker.innerHTML =
-						`<div class="dsh-csp-head"><span>云端与同步</span><button class="dsh-csp-mini" data-refresh="1">刷新</button></div>` +
+						`<div class="dsh-csp-head"><span>云端与同步</span><button class="dsh-csp-mini" data-pull="1">拉取远端</button><button class="dsh-csp-mini" data-refresh="1">刷新</button></div>` +
 						(noRepo
 							? `<div class="dsh-csp-cv-repo">还没有登记同步仓库。请先在「仓库管理…」登记你自己的私有仓库。</div>` +
 								`<div class="dsh-csp-foot"><button class="go" data-goto-repos="1">去登记仓库</button></div>`
@@ -603,6 +607,24 @@ window.__ModuleLoader__.load({
 					if (gotoRepos) gotoRepos.onclick = () => void showRepos();
 					const refresh = picker.querySelector("[data-refresh]");
 					if (refresh) refresh.onclick = () => void showCloudView(expanded);
+					const pullBtn = picker.querySelector("[data-pull]");
+					if (pullBtn) {
+						pullBtn.onclick = async () => {
+							if (pullBtn.dataset.busy) return;
+							pullBtn.dataset.busy = "1";
+							pullBtn.textContent = "拉取中…";
+							try {
+								setNote("正在拉取远端更新…");
+								const result = await postJson("/api/repos/pull", {});
+								setNote(String(result.output || "").split("\n").slice(-6).join("\n"), !result.ok);
+								await showCloudView(expanded);
+							} catch (error) {
+								setNote("拉取失败：" + (error.message || error), true);
+								pullBtn.textContent = "拉取远端";
+								delete pullBtn.dataset.busy;
+							}
+						};
+					}
 					picker.querySelectorAll("[data-proj]").forEach((row) => {
 						row.onclick = () => {
 							const name = row.dataset.proj;

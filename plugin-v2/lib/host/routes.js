@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { AppError } from "../shared.js";
 import { downloadWorkspace } from "../core/download.js";
-import { commitAndPush, ensureAttributes, ensureGitConfig, ensureLfs } from "../core/git.js";
+import { commitAndPush, ensureAttributes, ensureGitConfig, ensureLfs, pullFastForward } from "../core/git.js";
 import { uploadWorkspace } from "../core/merge.js";
 import { listProjects } from "../core/project.js";
 import { addRepo, defaultRepo, findRepo, listBindings, listRepos, publicRepos, removeRepo, setBinding } from "../core/repo.js";
@@ -27,6 +27,14 @@ const requireRepo = (ctx, repoId) => {	const repo = repoId ? findRepo(repoId) : 
 };
 
 const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+
+/** 把 pullFastForward 的结果转成一行可读输出 */
+const pullMessage = (result) => {
+	if (!result) return "未拉取远端";
+	if (result.ok) return result.updated ? `已拉取远端新提交（${result.before} → ${result.after}）` : "远端无新提交";
+	const reason = (result.error || result.output || "未知错误").split("\n").filter(Boolean)[0] || "未知错误";
+	return `⚠ 拉取远端失败（继续使用本地数据）：${reason}`;
+};
 
 export function createRoutes(ctx) {
 	return {
@@ -56,6 +64,23 @@ export function createRoutes(ctx) {
 			return { ok: true, repos: publicRepos() };
 		},
 
+		"POST /api/repos/pull": async (body) => {
+			const repos = body.repoId
+				? [findRepo(String(body.repoId))].filter(Boolean)
+				: listRepos().filter((repo) => repo.ok);
+			if (!repos.length) throw new AppError("no-repo", "没有可用仓库");
+			const lines = [];
+			const results = [];
+			for (const repo of repos) {
+				await ensureGitConfig(repo.path);
+				const result = await pullFastForward(repo.path);
+				results.push({ repoId: repo.id, name: repo.name, ...result });
+				lines.push(`${repo.name}：${pullMessage(result)}`);
+			}
+			const changed = results.some((result) => result.updated);
+			return { ok: true, changed, output: lines.join("\n"), results };
+		},
+
 		"GET /api/tree": () => {
 			const repos = listRepos();
 			return { ...buildTree(repos), repos: publicRepos(), suggestedBase: ctx.workspaceBase || "" };
@@ -76,6 +101,7 @@ export function createRoutes(ctx) {
 			const lfsReady = await ensureLfs(repo.path);
 			await ensureAttributes(repo.path);
 			await ensureGitConfig(repo.path);
+			lines.push(pullMessage(await pullFastForward(repo.path)));
 			const result = await uploadWorkspace(repo.path, cwd, { storeLarge: lfsReady });
 			setBinding(result.projectName, repo.id);
 
@@ -133,6 +159,8 @@ export function createRoutes(ctx) {
 			const lines = [`目标仓库：${repo.name}`];
 			let workspace = null;
 			let pendingLarge = [];
+			// 多设备：下载前默认 fast-forward 拉取远端（可传 pull:false 跳过）
+			if (body.pull !== false) lines.push(pullMessage(await pullFastForward(repo.path)));
 
 			if (withWorkspace) {
 				workspace = await downloadWorkspace(repo.path, projectNameValue, targetDir);

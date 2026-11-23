@@ -1,6 +1,7 @@
 // 集成测试：v2 Host API 全流程（多仓库登记 / 上传合并 / 下载 / 会话 cwd 改写 / 推送）
 // 运行：node tests/integration/api.test.mjs <pluginDir> <base> <port>
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -179,6 +180,52 @@ const remoteLog = execFileSync("git", ["log", "--oneline", "-1", "main"], { cwd:
 check("G1 已推送到远端", remoteLog.length > 0, remoteLog);
 const headTree = execFileSync("git", ["ls-tree", "-r", "--name-only", "main"], { cwd: remote, encoding: "utf8" });
 check("G2 远端提交包含 store/index", headTree.includes("store/") && headTree.includes("index/projects/"));
+
+// 多设备：另一台设备把新项目/会话推送到远端 → 本机拉取后应可见并可下载
+const deviceB = path.join(base, "deviceB");
+execFileSync("git", ["-c", "core.longpaths=true", "clone", "--quiet", "--branch", "main", remote, deviceB], { stdio: ["ignore", "ignore", "ignore"] });
+const remoteProject = "remote-project";
+const remoteSid = "session-99999999-9999-4999-8999-999999999999";
+const remoteWorkspace = path.join(base, "remote-workspace");
+fs.mkdirSync(remoteWorkspace, { recursive: true });
+const remoteFile = path.join(remoteWorkspace, "hello.txt");
+fs.writeFileSync(remoteFile, "remote hello\n", "utf8");
+const remoteHash = createHash("sha256").update(fs.readFileSync(remoteFile)).digest("hex");
+const remoteIndex = path.join(deviceB, "index", "projects", remoteProject);
+const remoteStore = path.join(deviceB, "store", remoteProject, "files");
+fs.mkdirSync(path.join(remoteIndex, "sessions", remoteSid), { recursive: true });
+fs.mkdirSync(remoteStore, { recursive: true });
+fs.copyFileSync(remoteFile, path.join(remoteStore, "hello.txt"));
+fs.writeFileSync(path.join(remoteIndex, "manifest.json"), JSON.stringify({ schema: 1, files: { "hello.txt": { hash: remoteHash, size: 13 } }, large: [], tooLong: [] }));
+fs.writeFileSync(path.join(remoteIndex, "large.json"), JSON.stringify({ schema: 1, large: [], tooLong: [] }));
+fs.writeFileSync(path.join(remoteIndex, "meta.json"), JSON.stringify({ schema: 1, name: remoteProject, cwd: remoteWorkspace, title: "remote", aliases: [], sessions: [remoteSid] }));
+fs.writeFileSync(path.join(remoteIndex, "sessions", remoteSid, "meta.json"), JSON.stringify({ schema: 1, id: remoteSid, title: "远端会话", cwd: remoteWorkspace, project: remoteProject, scope: "", sessionFile: "session.v4.jsonl.zstd", sessionBytes: 80 }));
+const remoteSessionBin = zstdCompressSync(Buffer.from(JSON.stringify({ type: "session", version: 4, id: remoteSid, createdAt: 1, cwd: remoteWorkspace }) + "\n", "utf8"));
+fs.writeFileSync(path.join(remoteIndex, "sessions", remoteSid, "session.v4.jsonl.zstd"), remoteSessionBin);
+fs.writeFileSync(
+	path.join(remoteIndex, "sessions", remoteSid, "workspace-ref.json"),
+	JSON.stringify({ schema: 1, project: remoteProject, scope: "", manifestHash: createHash("sha256").update(fs.readFileSync(path.join(remoteIndex, "manifest.json"))).digest("hex"), files: 1 }),
+);
+execFileSync("git", ["config", "user.name", "B"], { cwd: deviceB });
+execFileSync("git", ["config", "user.email", "b@local"], { cwd: deviceB });
+execFileSync("git", ["add", "-A"], { cwd: deviceB });
+execFileSync("git", ["commit", "-m", "deviceB: remote session"], { cwd: deviceB, stdio: "ignore" });
+execFileSync("git", ["push", "origin", "main"], { cwd: deviceB, stdio: "ignore" });
+
+response = await post("/api/repos/pull", {});
+check("M1 多设备：拉取远端成功", response.ok === true && response.changed === true, String(response.output || "").split("\n")[0]);
+const cloudAfterPull = await call("/api/cloud-view");
+const remoteRow = (cloudAfterPull.projects || []).find((project) => project.name === remoteProject);
+check("M2 拉取后云端视图出现远端项目", Boolean(remoteRow), JSON.stringify((cloudAfterPull.projects || []).map((p) => p.name).slice(-4)));
+check("M3 远端会话可见", Boolean(remoteRow && remoteRow.sessions.some((session) => session.id === remoteSid)));
+
+const remoteDownload = path.join(base, "remote-download");
+response = await post("/api/download-project", { repoId, name: remoteProject, targetDir: remoteDownload, sessionIds: [remoteSid], withWorkspace: true });
+check(
+	"M4 拉取后可下载远端项目与会话",
+	response.ok === true && fs.existsSync(path.join(remoteDownload, "hello.txt")) && fs.existsSync(path.join(home, "sessions", projectKeyOf(remoteDownload), remoteSid, "session.v4.jsonl.zstd")),
+	String(response.output || "").split("\n").slice(0, 2).join(" / "),
+);
 
 // 仓库移除：允许移除最后一个（空注册表合法）
 response = await post("/api/repos/remove", { id: repoId });

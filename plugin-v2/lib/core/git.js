@@ -73,12 +73,37 @@ export async function commitAndPush(repoPath, message) {
 	return { committed: true, pushed: true, branch, output: "已提交并推送" };
 }
 
-/** 拉取远端（fast-forward） */
+/** 拉取远端（fast-forward），返回结构化结果（是否更新、前后 commit） */
 export async function pull(repoPath) {
 	let branch = "main";
 	const head = await runGit(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"], 15000);
 	if (head.code === 0 && head.out.trim() && head.out.trim() !== "HEAD") branch = head.out.trim();
 	return runGit(repoPath, ["pull", "--ff-only", "origin", branch], 600000);
+}
+
+/**
+ * 多设备同步：fast-forward 拉取远端。
+ * @returns {Promise<{ok:boolean, updated:boolean, branch:string, before:string, after:string, output:string, error:string}>}
+ */
+export async function pullFastForward(repoPath) {
+	let branch = "main";
+	const head = await runGit(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"], 15000);
+	if (head.code === 0 && head.out.trim() && head.out.trim() !== "HEAD") branch = head.out.trim();
+
+	const before = await runGit(repoPath, ["rev-parse", "HEAD"], 15000);
+	const result = await runGit(repoPath, ["pull", "--ff-only", "origin", branch], 600000);
+	const after = await runGit(repoPath, ["rev-parse", "HEAD"], 15000);
+	const beforeHash = before.code === 0 ? before.out.trim() : "";
+	const afterHash = after.code === 0 ? after.out.trim() : "";
+	return {
+		ok: result.code === 0,
+		updated: Boolean(beforeHash && afterHash && beforeHash !== afterHash),
+		branch,
+		before: beforeHash.slice(0, 7),
+		after: afterHash.slice(0, 7),
+		output: (result.out || "").trim(),
+		error: (result.err || "").trim(),
+	};
 }
 
 export async function isGitRepo(dir) {
