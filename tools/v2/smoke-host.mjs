@@ -54,10 +54,14 @@ const cloudProjects = (cloudView.data && cloudView.data.projects) || [];
 check("H6 读取云端视图", cloudView.status === 200 && Array.isArray(cloudProjects), `云端项目 ${cloudProjects.length} 个`);
 
 const picker = await (async () => {
-	const response = await fetch(`${base}/api/pick-directory?token=${encodeURIComponent(token)}`, { method: "POST" });
+	const response = await fetch(`${base}/api/pick-directory?token=${encodeURIComponent(token)}`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ probe: true }),
+	});
 	return { status: response.status, data: await response.json() };
 })();
-check("H7 目录选择接口可用（无原生能力时 available:false）", picker.status === 200 && picker.data && typeof picker.data.available === "boolean", JSON.stringify(picker.data));
+check("H7 目录选择能力可探测（不会弹框）", picker.status === 200 && picker.data && picker.data.available === true, JSON.stringify(picker.data));
 
 dispose();
 await new Promise((resolve) => setTimeout(resolve, 200));

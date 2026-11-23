@@ -119,6 +119,14 @@ check(
 const healthResponse = await fetch(`${baseUrl}/api/health`);
 check("X3 正常响应带 Allow-Origin", healthResponse.headers.get("access-control-allow-origin") === "*", healthResponse.headers.get("access-control-allow-origin") || "(缺失)");
 
+// 目录选择能力（probe 只探测，不打开系统弹窗）
+const pickerProbe = await post("/api/pick-directory", { probe: true });
+check(
+	"Y1 目录选择能力可用（probe 不弹框）",
+	pickerProbe.available === true && ["windows", "native", "legacy"].includes(pickerProbe.kind),
+	JSON.stringify(pickerProbe),
+);
+
 // 登记仓库
 let response = await post("/api/repos", { path: repo, name: "主仓库" });
 check("R1 登记本机仓库", response.ok === true && response.repos.length === 1, JSON.stringify(response.repos));

@@ -8,6 +8,7 @@ import { downloadWorkspace } from "../core/download.js";
 import { commitAndPush, ensureAttributes, ensureGitConfig, ensureLfs, pullFastForward } from "../core/git.js";
 import { uploadWorkspace } from "../core/merge.js";
 import { findProject, listProjects } from "../core/project.js";
+import { pickFolderWindows, windowsPickerAvailable } from "./folder-picker.js";
 import { addRepo, defaultRepo, findRepo, listBindings, listRepos, publicRepos, removeRepo, setBinding } from "../core/repo.js";
 import { registerWorkspace, repairRegistry, validateRegistry, readRegistry } from "../core/registry.js";
 import { downloadSession, listCloudSessions, listSessions, uploadSession } from "../core/session.js";
@@ -55,6 +56,44 @@ const resolveDownloadBase = (ctxValue) => {
 
 /** 云端项目名形如 `标题__路径键`，取标题作为默认文件夹名 */
 const friendlyProjectTitle = (projectNameValue) => sanitizeFolderName(String(projectNameValue || "").split("__")[0]);
+
+/** 通过 DSH directoryPicker 服务选择目录（native / browse / 旧版兼容） */
+async function pickWithDshPicker(ctx, body = {}, probeOnly = false) {
+	const picker = ctx.directoryPicker;
+	if (!picker) {
+		return { available: false, kind: "none", hint: "当前环境没有目录选择服务，可在下载对话框直接编辑路径（默认目录已自动填充）" };
+	}
+	try {
+		const capability = typeof picker.capability === "function" ? picker.capability() : null;
+		if (capability && capability.kind === "native" && typeof capability.pick === "function") {
+			if (probeOnly) return { available: true, kind: "native" };
+			const controller = new AbortController();
+			const timer = setTimeout(() => controller.abort(), 180000);
+			try {
+				const selected = await capability.pick(controller.signal);
+				return { available: true, kind: "native", path: selected || "", canceled: !selected };
+			} finally {
+				clearTimeout(timer);
+			}
+		}
+		if (capability && capability.kind === "browse") {
+			return {
+				available: false,
+				kind: "browse",
+				hint: "当前环境使用应用内目录浏览器；默认目录已自动填充，可直接编辑路径",
+			};
+		}
+		// 兼容旧版目录选择服务
+		if (typeof picker.pickDirectory === "function") {
+			const picked = await picker.pickDirectory({ title: "选择下载位置" });
+			const selected = typeof picked === "string" ? picked : picked && picked.path ? picked.path : "";
+			return { available: true, kind: "legacy", path: selected, canceled: !selected };
+		}
+		return { available: false, kind: capability ? capability.kind : "unknown" };
+	} catch (error) {
+		return { available: true, kind: "native", path: "", canceled: false, error: error.message || String(error) };
+	}
+}
 
 export function createRoutes(ctx) {
 	return {
@@ -240,38 +279,26 @@ export function createRoutes(ctx) {
 		},
 
 		"POST /api/pick-directory": async (body) => {
-			const picker = ctx.directoryPicker;
-			if (!picker) return { available: false, kind: "none", hint: "当前环境没有目录选择服务，可在下载对话框直接编辑路径" };
-			try {
-				const capability = typeof picker.capability === "function" ? picker.capability() : null;
-				if (capability && capability.kind === "native" && typeof capability.pick === "function") {
-					if (body && body.probe === true) return { available: true, kind: "native" };
-					const controller = new AbortController();
-					const timer = setTimeout(() => controller.abort(), 180000);
-					try {
-						const selected = await capability.pick(controller.signal);
-						return { available: true, kind: "native", path: selected || "", canceled: !selected };
-					} finally {
-						clearTimeout(timer);
-					}
-				}
-				if (capability && capability.kind === "browse") {
-					return {
-						available: false,
-						kind: "browse",
-						hint: "当前环境使用应用内目录浏览器；默认目录已自动填充，可直接编辑路径",
-					};
-				}
-				// 兼容旧版目录选择服务
-				if (typeof picker.pickDirectory === "function") {
-					const picked = await picker.pickDirectory({ title: "选择下载位置" });
-					const selected = typeof picked === "string" ? picked : picked && picked.path ? picked.path : "";
-					return { available: true, kind: "legacy", path: selected, canceled: !selected };
-				}
-				return { available: false, kind: capability ? capability.kind : "unknown" };
-			} catch (error) {
-				return { available: true, kind: "native", path: "", canceled: false, error: error.message || String(error) };
+			const probeOnly = Boolean(body && body.probe === true);
+			const preferDsh = Boolean(body && body.useDshNative === true) || process.platform !== "win32";
+
+			// Windows：默认使用系统标准的"浏览文件夹"对话框（PowerShell FolderBrowserDialog）
+			if (!preferDsh && windowsPickerAvailable()) {
+				if (probeOnly) return { available: true, kind: "windows" };
+				const picked = await pickFolderWindows({ title: "选择下载位置" });
+				if (picked.ok) return { available: true, kind: "windows", path: picked.path, canceled: picked.canceled };
+				// Windows 选择框失败时退回 DSH 能力
+				const fallback = await pickWithDshPicker(ctx, body, false);
+				if (fallback.available && !fallback.error) return fallback;
+				return {
+					available: true,
+					kind: "windows",
+					path: "",
+					canceled: false,
+					error: picked.error || (fallback && fallback.error) || "打开系统选择框失败",
+				};
 			}
+			return pickWithDshPicker(ctx, body, probeOnly);
 		},
 
 		"GET /api/registry-status": () => {
