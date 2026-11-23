@@ -259,6 +259,14 @@ export function createRoutes(ctx) {
 								} catch {}
 							}
 						}
+						// DSH 会话头索引只在启动时构建；调用 sessionKnown() 强制重扫，否则侧边栏会过滤掉刚下载的会话
+						if (typeof workspaceRegistry.sessionKnown === "function") {
+							for (const session of downloaded) {
+								try {
+									await workspaceRegistry.sessionKnown(session.id);
+								} catch {}
+							}
+						}
 						registration = { mode: "official", ok: true, workspaceId: workspaceRecord.id || null, title, attached };
 						lines.push(`已通过 DSH 官方服务登记工作区：${title}${attached ? `（挂载 ${attached} 个会话）` : ""}`);
 					} else {

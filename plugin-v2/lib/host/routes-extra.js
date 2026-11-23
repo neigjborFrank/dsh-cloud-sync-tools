@@ -52,6 +52,8 @@ function listWorkspaces(ctx) {
 	const workspaceRegistry = getService(ctx, "workspaceRegistry");
 	if (workspaceRegistry && typeof workspaceRegistry.list === "function") {
 		const workspaces = workspaceRegistry.list().map((entry) => {
+			// 优先用实体的 sessionIds getter（按其会话头索引过滤后的真实归属，和侧边栏一致）
+			const entityIds = entry && entry.sessionIds;
 			let raw = entry;
 			try {
 				if (entry && typeof entry.toJSON === "function") raw = entry.toJSON();
@@ -62,7 +64,7 @@ function listWorkspaces(ctx) {
 				id: String(raw.id || raw.workspaceId || ""),
 				title: raw.title || "",
 				path: typeof record === "string" ? record : "",
-				sessions: Array.isArray(raw.sessionIds) ? raw.sessionIds.length : Number(raw.sessionCount || 0),
+				sessions: Array.isArray(entityIds) ? entityIds.length : Array.isArray(raw.sessionIds) ? raw.sessionIds.length : Number(raw.sessionCount || 0),
 			};
 		});
 		return { ok: true, mode: "official", workspaces };
@@ -107,7 +109,8 @@ export function createExtraRoutes(ctx) {
 				let record = null;
 				if (typeof workspaceRegistry.resolveByPath === "function") record = (await workspaceRegistry.resolveByPath(target)) || null;
 				if (!record) record = await workspaceRegistry.create(target, title);
-				// 把 cwd 指向该目录的本地会话挂到工作区账上（DSH 侧边栏按账目分组，仅创建不挂会话会显示"无会话"）
+				// 把 cwd 指向该目录的本地会话挂到工作区账上；并调用 sessionKnown() 强制刷新
+				// DSH 会话头索引（索引只在启动时构建，直接写会话文件不会自动收录，否则侧边栏会过滤掉）。
 				const attached = [];
 				if (record && typeof record.attachSession === "function") {
 					for (const session of listSessions()) {
@@ -118,11 +121,20 @@ export function createExtraRoutes(ctx) {
 						} catch {}
 					}
 				}
+				const refreshed = [];
+				if (typeof workspaceRegistry.sessionKnown === "function") {
+					for (const id of attached) {
+						try {
+							if (await workspaceRegistry.sessionKnown(id)) refreshed.push(id);
+						} catch {}
+					}
+				}
 				return {
 					ok: true,
 					mode: "official",
 					existing: Boolean(record),
 					attached,
+					refreshed,
 					workspace: record ? { id: record.id || "", title: record.title || title, path: target } : null,
 				};
 			}
