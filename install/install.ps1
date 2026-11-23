@@ -24,6 +24,91 @@ function Write-Ok($text) { Write-Host "[ok] $text" -ForegroundColor Green }
 function Write-Warn($text) { Write-Host "[!] $text" -ForegroundColor Yellow }
 function Write-Err($text) { Write-Host "[x] $text" -ForegroundColor Red }
 
+# ---------- 0. 依赖检查与自动安装 ----------
+function Find-GitExe {
+    $cmd = Get-Command git -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $candidates = @(
+        "$env:ProgramFiles\Git\cmd\git.exe",
+        "${env:ProgramFiles(x86)}\Git\cmd\git.exe",
+        "$env:LOCALAPPDATA\Programs\Git\cmd\git.exe"
+    )
+    foreach ($candidate in $candidates) { if (Test-Path $candidate) { return $candidate } }
+    return $null
+}
+function Update-PathWithGit {
+    $dirs = @("$env:ProgramFiles\Git\cmd", "$env:LOCALAPPDATA\Programs\Git\cmd")
+    foreach ($dir in $dirs) {
+        if ((Test-Path $dir) -and ($env:Path -notlike "*$dir*")) { $env:Path = "$dir;$env:Path" }
+    }
+}
+
+Write-Step "依赖检查"
+$gitExe = Find-GitExe
+if (-not $gitExe) {
+    Write-Warn "未检测到 Git（克隆公开仓库、提交推送都需要它）"
+    if ($DryRun) {
+        Write-Ok "（演练）将尝试自动安装 Git"
+    } else {
+        $winget = Get-Command winget -ErrorAction SilentlyContinue
+        if ($winget) {
+            Write-Step "尝试用 winget 自动安装 Git（需要网络，可能较慢）…"
+            try {
+                & winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
+            } catch { Write-Warn "winget 安装失败：$_" }
+            Update-PathWithGit
+            $gitExe = Find-GitExe
+        }
+        if (-not $gitExe) {
+            Write-Step "尝试下载 Git for Windows 安装包（当前用户安装，无需管理员）…"
+            try {
+                $gitInstaller = Join-Path $env:TEMP "Git-64-bit.exe"
+                Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/latest/download/Git-64-bit.exe" -OutFile $gitInstaller -UseBasicParsing -TimeoutSec 300
+                Start-Process -FilePath $gitInstaller -ArgumentList "/VERYSILENT", "/NORESTART", "/CURRENTUSER" -Wait
+                Update-PathWithGit
+                $gitExe = Find-GitExe
+            } catch { Write-Warn "自动下载/安装 Git 失败：$_" }
+        }
+    }
+}
+if ($gitExe) {
+    Write-Ok "Git：$gitExe"
+} else {
+    Write-Err "未找到 Git，自动安装也失败。请手动安装 Git for Windows（https://git-scm.com/download/win）后重新运行本脚本"
+    exit 1
+}
+
+# git-lfs（可选：超过 95MB 的大文件需要）
+try {
+    $lfsVersion = (& $gitExe lfs version 2>$null)
+    if ($LASTEXITCODE -eq 0) { Write-Ok "git-lfs：$lfsVersion" }
+    else { Write-Warn "未检测到 git-lfs（可选；>95MB 大文件需要）。可运行：winget install GitHub.GitLFS" }
+} catch { Write-Warn "git-lfs 检查失败（可选组件，可忽略）" }
+
+# PowerShell 版本
+if ($PSVersionTable.PSVersion.Major -lt 5) {
+    Write-Warn "PowerShell 版本较旧（$($PSVersionTable.PSVersion)），建议使用 5.1+"
+}
+
+# DSH 是否在运行（安装只改 profile，需要完全重启后生效）
+$dshProcesses = Get-Process -Name "DeepSeek Harness" -ErrorAction SilentlyContinue
+if ($dshProcesses) {
+    Write-Warn "检测到 DSH 正在运行：安装会修改 profile，请安装完成后完全退出并重新启动 DSH"
+} else {
+    Write-Ok "DSH 当前未运行"
+}
+
+# 默认端口占用（插件宿主使用 8732）
+$portBusy = $false
+try {
+    $portBusy = [bool](Get-NetTCPConnection -LocalPort 8732 -State Listen -ErrorAction SilentlyContinue)
+} catch {}
+if ($portBusy) {
+    Write-Warn "端口 8732 当前被占用（可能是旧插件实例）；重启 DSH 后新插件会重新监听"
+} else {
+    Write-Ok "端口 8732 可用"
+}
+
 # ---------- 1. 定位仓库根目录 ----------
 $scriptRoot = Split-Path -Parent $PSCommandPath
 function Find-RepoRoot([string]$start) {
