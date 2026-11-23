@@ -45,6 +45,8 @@ git clone https://github.com/neigjborFrank/dsh-cloud-sync-tools.git C:\Users\<�
 
 **下载位置**：默认下载到 `%USERPROFILE%\Documents\deepseek-harness\workspaces\<项目名>`，目录不存在时自动创建；下载对话框点「选择文件夹…」会弹出 Windows 标准的"浏览文件夹"窗口，也可留空直接使用默认目录。
 
+> **工作区登记**：下载/登记工作区走 DSH 官方 `workspaceRegistry`，并对该目录下的会话执行 `attachSession` 挂载；侧边栏显示"工作区下无会话"时通常是登记未完成，重新下载或点「登记工作区」即可。
+
 > **会话与工作区分开存放**：工作区文件写到所选目录；会话始终保存在 `%DSH_HOME%\sessions\<cwd 路径键>\<会话ID>\`。下载到新工作区时默认「迁移会话」：旧位置的同 ID 副本会被移到 `%DSH_HOME%\cloud-sync\session-trash\`（可恢复），避免同一会话在磁盘上出现两份。
 
 **卸载**：`node tools/v2/uninstall.mjs`（从 DSH profile 移除插件，保留私有仓库配置；加 `--purge-data` 连配置一起删）。
@@ -81,7 +83,7 @@ node --test tests/unit/core.test.mjs
 node --test tests/unit/session_repo.test.mjs
 node --test tests/unit/client_static.test.mjs
 
-# 集成测试（40 项，使用真实 git 仓库与 bare 远端；不会碰真实 DSH 数据；含 CORS 预检、多设备拉取、默认目录、目录选择、会话迁移清理、自动同步回归）
+# 集成测试（41 项，使用真实 git 仓库与 bare 远端；不会碰真实 DSH 数据；含 CORS 预检、多设备拉取、默认目录、目录选择、会话迁移清理、自动同步、云端行会话归行回归）
 node tests/integration/api.test.mjs <仓库根>/plugin-v2 <临时目录> 8910
 
 # 全新环境端到端（14 项：私有仓库地址配置 → 上传 → 新设备克隆下载）
