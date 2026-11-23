@@ -284,6 +284,15 @@ check(
 	String(response.output || "").split("\n").slice(0, 2).join(" / "),
 );
 
+// 云端项目行必须列出云端会话：本地副本在别的 cwd 时也不能被全局去重吃掉
+const treeAfterDownload = await call("/api/tree");
+const cloudProjectRow = (treeAfterDownload.projects || []).find((project) => project.cloudProject && project.cloudProject.name === remoteProject);
+check(
+	"T1 云端项目行仍列出云端会话（本地副本 cwd 不同）",
+	Boolean(cloudProjectRow) && cloudProjectRow.sessions.length >= 1 && cloudProjectRow.sessions.some((session) => session.id === remoteSid),
+	JSON.stringify({ rows: (treeAfterDownload.projects || []).filter((project) => project.title === "remote").map((project) => ({ cwd: project.cwd, sessions: project.sessions.length })) }),
+);
+
 // 仓库移除：允许移除最后一个（空注册表合法）
 response = await post("/api/repos/remove", { id: repoId });
 check("X4 允许移除最后一个仓库", response.ok === true && Array.isArray(response.repos) && response.repos.length === 0, JSON.stringify(response.repos));

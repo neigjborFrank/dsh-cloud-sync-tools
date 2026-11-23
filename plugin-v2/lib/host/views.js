@@ -78,10 +78,12 @@ export function buildTree(repos) {
 
 	for (const project of cloudProjectMap.values()) ensure(project.cwd).cloudProject = project;
 
-	const localIds = new Set(local.map((session) => session.id));
+	// 云端会话按"自己的 cwd"归行；即便本地已有同 ID 副本（可能在别的 cwd），
+	// 云端项目行也必须列出该会话，否则会出现"云端有会话但工作区下无会话"、无法从云端行下载。
 	for (const session of cloudSessions.values()) {
-		if (localIds.has(session.id)) continue;
-		ensure(session.cwd).sessions.push({ id: session.id, title: session.title, archived: false, bytes: session.sessionBytes, modified: 0, cloud: session });
+		const row = ensure(session.cwd);
+		if (row.sessions.some((item) => item.id === session.id)) continue;
+		row.sessions.push({ id: session.id, title: session.title, archived: false, bytes: session.sessionBytes, modified: 0, cloud: session });
 	}
 
 	return { suggestedBase: "", bindings, projects: [...byName.values()] };
