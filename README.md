@@ -72,7 +72,7 @@ node --test tests/unit/core.test.mjs
 node --test tests/unit/session_repo.test.mjs
 node --test tests/unit/client_static.test.mjs
 
-# 集成测试（23 项，使用真实 git 仓库与 bare 远端；不会碰真实 DSH 数据）
+# 集成测试（27 项，使用真实 git 仓库与 bare 远端；不会碰真实 DSH 数据；含 CORS 预检回归）
 node tests/integration/api.test.mjs <仓库根>/plugin-v2 <临时目录> 8910
 
 # 全新环境端到端（14 项：私有仓库地址配置 → 上传 → 新设备克隆下载）
@@ -87,6 +87,7 @@ node tests/integration/compat.test.mjs <私有仓库克隆> <临时目录>
 - 不自动登记仓库：工具仓库与同步仓库严格分离；
 - 不破坏 DSH 的 workspace 注册表：写前备份、写后校验、失败不写；
 - 不静默覆盖数据：同路径不同内容进 `conflicts/`，下载多余文件进回收目录；
+- 浏览器兼容：本地 HTTP 服务返回完整 CORS 头（预检 204 + Allow-Headers/Methods），Web 界面写操作可用；
 - 容器仓库不强制一一对应：多个工作区可放同一个仓库，也可分开放；仓库由使用者自行整理。
 
 ## 许可

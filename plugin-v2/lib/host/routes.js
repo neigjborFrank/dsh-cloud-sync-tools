@@ -12,8 +12,15 @@ import { registerWorkspace, repairRegistry, validateRegistry, readRegistry } fro
 import { downloadSession, listCloudSessions, listSessions, uploadSession } from "../core/session.js";
 import { buildCloudView, buildTree } from "./views.js";
 
-const requireRepo = (ctx, repoId) => {
-	const repo = repoId ? findRepo(repoId) : defaultRepo();
+const PLUGIN_VERSION = (() => {
+	try {
+		return JSON.parse(fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version || "0.0.0";
+	} catch {
+		return "0.0.0";
+	}
+})();
+
+const requireRepo = (ctx, repoId) => {	const repo = repoId ? findRepo(repoId) : defaultRepo();
 	if (!repo) throw new AppError("no-repo", "还没有登记同步仓库：请先在「仓库管理…」登记你的私有仓库");
 	if (!repo.ok) throw new AppError("repo-missing", `仓库路径不可用：${repo.path}`);
 	return repo;
@@ -23,7 +30,7 @@ const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
 export function createRoutes(ctx) {
 	return {
-		"GET /api/health": () => ({ ok: true, service: "cloud-sync", version: "2.0.0-alpha.1", repoRoot: ctx.repoRoot }),
+		"GET /api/health": () => ({ ok: true, service: "cloud-sync", version: PLUGIN_VERSION, repoRoot: ctx.repoRoot }),
 
 		"GET /api/repos": () => ({
 			repos: publicRepos(),

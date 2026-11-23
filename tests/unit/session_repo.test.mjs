@@ -56,7 +56,14 @@ test("repo: 登记/去重/绑定/移除", async () => {
 	repo.removeRepo(first.id, file);
 	assert.equal(repo.getBinding("proj", file), "");
 	assert.equal(repo.listRepos(file).length, 1);
-	assert.throws(() => repo.removeRepo(second.id, file), /至少保留一个仓库/);
+	// 允许移除最后一个仓库：空注册表是合法初始状态（避免死记录无法清理）
+	repo.removeRepo(second.id, file);
+	assert.equal(repo.listRepos(file).length, 0);
+	assert.throws(
+		() => repo.removeRepo("repo-missing", file),
+		(error) => Boolean(error && error.code === "not-found-repo"),
+		"找不到仓库时应返回带错误码的业务错误",
+	);
 });
 
 test("registry: 校验/修复重复登记，并保留正确归属", () => {

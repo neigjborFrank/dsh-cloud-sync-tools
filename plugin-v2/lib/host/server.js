@@ -7,12 +7,22 @@ import { createRoutes } from "./routes.js";
 
 const MAX_BODY = 1024 * 1024;
 
+// 本地服务被 DSH Web 页面跨源访问（页面端口 != 8732），必须完整声明 CORS。
+// 默认 POST 带 Content-Type: application/json 会触发预检，缺少 Allow-Headers/Methods 时
+// 浏览器会在预检阶段直接失败（Failed to fetch），请求甚至到不了服务端。
+const CORS_HEADERS = {
+	"Access-Control-Allow-Origin": "*",
+	"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+	"Access-Control-Allow-Headers": "content-type",
+	"Access-Control-Max-Age": "600",
+};
+
 function sendJson(response, status, payload) {
 	const body = JSON.stringify(payload);
 	response.writeHead(status, {
 		"Content-Type": "application/json; charset=utf-8",
 		"Cache-Control": "no-store",
-		"Access-Control-Allow-Origin": "*",
+		...CORS_HEADERS,
 	});
 	response.end(body);
 }
@@ -54,7 +64,11 @@ export async function startServer({ repoRoot, port = 8732, workspaceRegistry, di
 		const url = new URL(request.url || "/", "http://127.0.0.1");
 		const pathname = url.pathname;
 
-		if (request.method === "OPTIONS") return sendJson(response, 200, {});
+		// 预检：直接 204 + 完整 CORS 头，不进入业务
+		if (request.method === "OPTIONS") {
+			response.writeHead(204, CORS_HEADERS);
+			return response.end();
+		}
 
 		// token 与健康检查端点不需要鉴权（客户端探活在取 token 之前）
 		if (pathname === "/token" && request.method === "GET") return sendJson(response, 200, { ok: true, token, port });

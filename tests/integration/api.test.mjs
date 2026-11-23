@@ -96,6 +96,28 @@ const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const projectsRoot = path.join(repo, "index", "projects");
 const storeRoot = path.join(repo, "store");
 
+// CORS 预检回归（浏览器页面端口 != 8732，POST 带 content-type 会触发预检）
+const preflight = await fetch(`${baseUrl}/api/repos`, {
+	method: "OPTIONS",
+	headers: {
+		Origin: "http://127.0.0.1:19387",
+		"Access-Control-Request-Method": "POST",
+		"Access-Control-Request-Headers": "content-type",
+	},
+});
+check(
+	"X1 预检返回 Allow-Headers（content-type）",
+	/content-type/i.test(preflight.headers.get("access-control-allow-headers") || ""),
+	preflight.headers.get("access-control-allow-headers") || "(缺失)",
+);
+check(
+	"X2 预检返回 Allow-Methods（POST）",
+	/POST/i.test(preflight.headers.get("access-control-allow-methods") || ""),
+	preflight.headers.get("access-control-allow-methods") || "(缺失)",
+);
+const healthResponse = await fetch(`${baseUrl}/api/health`);
+check("X3 正常响应带 Allow-Origin", healthResponse.headers.get("access-control-allow-origin") === "*", healthResponse.headers.get("access-control-allow-origin") || "(缺失)");
+
 // 登记仓库
 let response = await post("/api/repos", { path: repo, name: "主仓库" });
 check("R1 登记本机仓库", response.ok === true && response.repos.length === 1, JSON.stringify(response.repos));
@@ -157,6 +179,10 @@ const remoteLog = execFileSync("git", ["log", "--oneline", "-1", "main"], { cwd:
 check("G1 已推送到远端", remoteLog.length > 0, remoteLog);
 const headTree = execFileSync("git", ["ls-tree", "-r", "--name-only", "main"], { cwd: remote, encoding: "utf8" });
 check("G2 远端提交包含 store/index", headTree.includes("store/") && headTree.includes("index/projects/"));
+
+// 仓库移除：允许移除最后一个（空注册表合法）
+response = await post("/api/repos/remove", { id: repoId });
+check("X4 允许移除最后一个仓库", response.ok === true && Array.isArray(response.repos) && response.repos.length === 0, JSON.stringify(response.repos));
 
 dispose();
 await new Promise((resolve) => setTimeout(resolve, 200));

@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { SCHEMA, readJson, writeJsonAtomic } from "../shared.js";
+import { AppError, SCHEMA, readJson, writeJsonAtomic } from "../shared.js";
 
 const GIT_CANDIDATES = ["C:\\Program Files\\Git\\cmd\\git.exe", "C:\\Program Files (x86)\\Git\\cmd\\git.exe"];
 
@@ -120,12 +120,12 @@ export async function addRepo({ url, name, path: existingPath, branch = "main" }
 	const cleanPath = String(existingPath || "").trim();
 
 	if (cleanUrl && registry.repos.some((repo) => String(repo.url || "").toLowerCase() === cleanUrl.toLowerCase())) {
-		throw new Error("该仓库地址已登记");
+		throw new AppError("duplicate-repo", "该仓库地址已登记");
 	}
 	if (cleanPath && registry.repos.some((repo) => path.resolve(repo.path) === path.resolve(cleanPath))) {
-		throw new Error("该本地路径已登记");
+		throw new AppError("duplicate-repo", "该本地路径已登记");
 	}
-	if (!cleanUrl && !cleanPath) throw new Error("需要提供仓库地址或本地路径");
+	if (!cleanUrl && !cleanPath) throw new AppError("bad-request", "需要提供仓库地址或本地路径");
 
 	let repoPath = cleanPath;
 	let repoUrl = cleanUrl;
@@ -136,11 +136,11 @@ export async function addRepo({ url, name, path: existingPath, branch = "main" }
 			fs.mkdirSync(path.dirname(repoPath), { recursive: true });
 			// -c core.longpaths=true：数据仓库可能包含 Windows 长路径，否则 checkout 会失败
 			const clone = await runGit(path.dirname(repoPath), ["-c", "core.longpaths=true", "clone", cleanUrl, repoPath], 600000);
-			if (clone.code !== 0) throw new Error("克隆失败：" + (clone.err || clone.out).trim());
+			if (clone.code !== 0) throw new AppError("clone-failed", "克隆失败：" + (clone.err || clone.out).trim());
 		}
 		await runGit(repoPath, ["config", "core.longpaths", "true"], 15000);
 	} else if (!fs.existsSync(path.join(repoPath, ".git"))) {
-		throw new Error("本地路径不是 git 仓库：" + repoPath);
+		throw new AppError("not-a-repo", "本地路径不是 git 仓库：" + repoPath);
 	}
 
 	// 统一到 main 分支，避免空仓库克隆后处于未出生分支导致 push 失败
@@ -167,14 +167,13 @@ export async function addRepo({ url, name, path: existingPath, branch = "main" }
 	return record;
 }
 
-/** 取消登记（不删除本地克隆），同时清理指向它的绑定 */
+/** 取消登记（不删除本地克隆），同时清理指向它的绑定；允许移除最后一个仓库（空注册表合法） */
 export function removeRepo(id, file = reposPath()) {
 	const registry = readRegistry(file);
-	if (!registry) throw new Error("还没有登记任何仓库");
+	if (!registry) throw new AppError("no-registry", "还没有登记任何仓库");
 	const before = registry.repos.length;
 	registry.repos = registry.repos.filter((repo) => repo.id !== id);
-	if (!registry.repos.length) throw new Error("至少保留一个仓库");
-	if (registry.repos.length === before) throw new Error("找不到该仓库");
+	if (registry.repos.length === before) throw new AppError("not-found-repo", "找不到该仓库");
 	for (const [projectNameValue, bound] of Object.entries(registry.bindings || {})) {
 		if (bound === id) delete registry.bindings[projectNameValue];
 	}
