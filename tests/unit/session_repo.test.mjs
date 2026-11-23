@@ -14,6 +14,7 @@ const project = await import("../../plugin-v2/lib/core/project.js");
 const repo = await import("../../plugin-v2/lib/core/repo.js");
 const registry = await import("../../plugin-v2/lib/core/registry.js");
 const session = await import("../../plugin-v2/lib/core/session.js");
+const sessionDownload = await import("../../plugin-v2/lib/core/session-download.js");
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "csp-v2-sr-"));
 const setHome = () => {
@@ -150,13 +151,17 @@ test("session: 本机枚举 / 上传（含 workspace-ref）/ 云端列表 / 下�
 
 	// 下载到新路径：cwd 被改写，文件落到对应 projectKey
 	const newCwd = "C:\\tmp\\downloaded\\workspace";
-	const downloaded = await session.downloadSession(repoRoot, id, { targetCwd: newCwd, home });
+	const downloaded = await sessionDownload.downloadSession(repoRoot, id, { targetCwd: newCwd, home });
 	assert.equal(downloaded.action, "written");
 	assert.equal(downloaded.cwd, newCwd);
 	const newFile = path.join(home, "sessions", layout.projectKeyOf(newCwd), id, "session.v4.jsonl.zstd");
 	assert.ok(fs.existsSync(newFile));
 	assert.equal(session.readHeader(newFile).cwd, newCwd);
+	// 迁移：旧 projectKey 下的同 id 副本应被移入 session-trash，避免磁盘上两份会话
+	assert.ok((downloaded.cleaned || []).length >= 1, "应返回清理的旧副本");
+	assert.equal(fs.existsSync(path.join(home, "sessions", projectKey, id)), false, "旧位置会话副本应被移走");
+	assert.ok(fs.existsSync(path.join(home, "cloud-sync", "session-trash")), "旧副本应移入 session-trash");
 
-	const again = await session.downloadSession(repoRoot, id, { targetCwd: newCwd, home });
+	const again = await sessionDownload.downloadSession(repoRoot, id, { targetCwd: newCwd, home });
 	assert.equal(again.action, "skipped");
 });

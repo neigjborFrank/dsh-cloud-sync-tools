@@ -10,7 +10,8 @@ import { uploadWorkspace } from "../core/merge.js";
 import { findProject, listProjects } from "../core/project.js";
 import { addRepo, defaultRepo, findRepo, listBindings, listRepos, publicRepos, removeRepo, setBinding } from "../core/repo.js";
 import { registerWorkspace, repairRegistry, validateRegistry, readRegistry } from "../core/registry.js";
-import { downloadSession, listCloudSessions, listSessions, uploadSession } from "../core/session.js";
+import { downloadSession } from "../core/session-download.js";
+import { listCloudSessions, listSessions, uploadSession } from "../core/session.js";
 import { createExtraRoutes } from "./routes-extra.js";
 import { getService } from "./services.js";
 import { buildCloudView, buildTree } from "./views.js";
@@ -200,9 +201,12 @@ export function createRoutes(ctx) {
 			const downloaded = [];
 			for (const id of ids) {
 				try {
-					const result = await downloadSession(repo.path, id, { targetCwd: targetDir });
+					const result = await downloadSession(repo.path, id, { targetCwd: targetDir, migrate: body.migrate !== false });
 					downloaded.push(result);
 					lines.push(result.action === "skipped" ? `- 会话 ${id}：本地已一致` : `✓ 会话 ${id}（${result.action}）`);
+					if (result.cleaned && result.cleaned.length) {
+						lines.push(`- 已迁移旧位置副本 ${result.cleaned.length} 份（移到 %DSH_HOME%\\cloud-sync\\session-trash）`);
+					}
 				} catch (error) {
 					lines.push(`✗ 会话 ${id}: ${error.message}`);
 				}

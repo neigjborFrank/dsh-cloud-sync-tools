@@ -181,6 +181,10 @@ check("D2 工作区文件还原", fs.existsSync(path.join(downloadRoot, "proj", 
 check("D3 下载校验通过", response.workspace && response.workspace.verified === response.workspace.written, JSON.stringify({ written: response.workspace?.written, verified: response.workspace?.verified, failed: response.workspace?.failed }));
 const dlSession = path.join(home, "sessions", projectKeyOf(downloadRoot), sidSub, "session.v4.jsonl.zstd");
 check("D4 会话下载并改写 cwd", fs.existsSync(dlSession) && readHeader(dlSession).cwd === downloadRoot);
+// 会话迁移：旧工作区目录下的同 ID 副本必须被清理（移到 session-trash），否则磁盘上会有两份
+const oldSessionCopy = path.join(home, "sessions", projectKeyOf(sub), sidSub);
+check("Y2 迁移后旧位置会话副本已清理", !fs.existsSync(oldSessionCopy), oldSessionCopy);
+check("Y3 旧副本移入 session-trash（可恢复）", fs.existsSync(path.join(home, "cloud-sync", "session-trash")));
 check("D5 工作区登记", response.registration && response.registration.ok === true, JSON.stringify(response.registration));
 
 // 默认下载目录：未指定 targetDir 时自动在默认根目录下创建项目文件夹

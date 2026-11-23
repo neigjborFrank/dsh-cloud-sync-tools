@@ -6,7 +6,7 @@ import path from "node:path";
 import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
 
 import { ensureDir, hashBuffer, readJson, timestamp, writeJsonAtomic } from "../shared.js";
-import { layoutDir, projectDir, projectKeyOf, projectName } from "./layout.js";
+import { layoutDir, projectDir, projectKeyOf, projectName, samePath } from "./layout.js";
 import { ensureProject, listProjects, saveProjectMeta } from "./project.js";
 
 const SESSION_FILE = /^session(\.[A-Za-z0-9]+)*\.jsonl\.zstd$/;
@@ -157,7 +157,31 @@ export function findSessionDir(id, home = dshHome()) {
 	return null;
 }
 
-function findSessionFile(dir) {
+/** 优先选择"会话头 cwd 与期望 cwd 一致"的副本，避免多副本时上传错版本 */
+export function findSessionDirForCwd(id, cwd, home = dshHome()) {
+	const preferred = path.join(home, "sessions", projectKeyOf(cwd), id);
+	if (fs.existsSync(preferred)) return preferred;
+	const root = path.join(home, "sessions");
+	let projects = [];
+	try {
+		projects = fs.readdirSync(root, { withFileTypes: true });
+	} catch {
+		return null;
+	}
+	let first = null;
+	for (const projectEntry of projects) {
+		if (!projectEntry.isDirectory()) continue;
+		const dir = path.join(root, projectEntry.name, id);
+		if (!fs.existsSync(dir)) continue;
+		if (!first) first = dir;
+		const file = findSessionFile(dir);
+		const header = file ? readHeader(file) : null;
+		if (header && header.cwd && samePath(header.cwd, cwd)) return dir;
+	}
+	return first;
+}
+
+export function findSessionFile(dir) {
 	try {
 		const name = fs.readdirSync(dir).find((entry) => SESSION_FILE.test(entry));
 		return name ? path.join(dir, name) : null;
@@ -194,7 +218,7 @@ export function listCloudSessions(repoRoot) {
 	return out;
 }
 
-function writeProjCache(sessionId, cwd, home, title = "") {
+export function writeProjCache(sessionId, cwd, home, title = "") {
 	try {
 		const file = path.join(home, "storages", "session_projcache", "sessions", `${sessionId}.json`);
 		let payload = readJson(file);
@@ -220,10 +244,7 @@ function writeProjCache(sessionId, cwd, home, title = "") {
  * @param {{repoRoot:string,id:string,cwd?:string,projectName?:string,scope?:string,home?:string}} options
  */
 export async function uploadSession({ repoRoot, id, cwd, projectName: projectOverride, scope = "", home = dshHome() }) {
-	const sessionDir = cwd
-		? path.join(home, "sessions", projectKeyOf(cwd), id)
-		: findSessionDir(id, home);
-	const dir = fs.existsSync(sessionDir) ? sessionDir : findSessionDir(id, home);
+	const dir = cwd ? findSessionDirForCwd(id, cwd, home) : findSessionDir(id, home);
 	if (!dir) return { id, ok: false, error: "本机找不到该会话" };
 	const srcFile = findSessionFile(dir);
 	if (!srcFile) return { id, ok: false, error: "会话文件缺失" };
@@ -285,56 +306,4 @@ export async function uploadSession({ repoRoot, id, cwd, projectName: projectOve
 
 function projectNameOf(cwd) {
 	return String(cwd || "").length ? projectName(cwd) : "_no-cwd";
-}
-
-/**
- * 下载一个会话：targetCwd 存在时改写 cwd 并放到对应 projectKey。
- * @returns {{id, action:"written"|"overwritten"|"skipped"|"kept-local", path?, cwd?, duplicates?}}
- */
-export async function downloadSession(repoRoot, id, options = {}) {
-	const cloud = listCloudSessions(repoRoot).find((session) => session.id === id);
-	if (!cloud) throw new Error(`云端找不到会话 ${id}`);
-	const cloudDir = path.join(projectDir(repoRoot, cloud.project), "sessions", id);
-	const srcFile = findSessionFile(cloudDir);
-	if (!srcFile) throw new Error("云端会话文件缺失");
-
-	const home = options.home || dshHome();
-	const targetCwd = String(options.targetCwd || "");
-	const effectiveCwd = targetCwd || cloud.cwd;
-	const key = effectiveCwd ? projectKeyOf(effectiveCwd) : "_no-cwd";
-	const localDir = path.join(home, "sessions", key, id);
-	const localFile = path.join(localDir, path.basename(srcFile));
-	ensureDir(localDir);
-
-	let payload = fs.readFileSync(srcFile);
-	if (targetCwd) payload = rewriteSessionCwd(payload, targetCwd);
-
-	let action = "written";
-	if (fs.existsSync(localFile)) {
-		if (payload.equals(fs.readFileSync(localFile))) {
-			if (targetCwd) writeProjCache(id, targetCwd, home);
-			return { id, action: "skipped", path: localFile };
-		}
-		if (options.overwrite !== false) {
-			await fsp.copyFile(localFile, `${localFile}.bak-${timestamp()}`);
-			action = "overwritten";
-		} else {
-			return { id, action: "kept-local", path: localFile };
-		}
-	}
-
-	await fsp.writeFile(localFile, payload);
-	writeProjCache(id, effectiveCwd || "", home, cloud.title);
-
-	const duplicates = [];
-	try {
-		const root = path.join(home, "sessions");
-		for (const projectEntry of fs.readdirSync(root, { withFileTypes: true })) {
-			if (!projectEntry.isDirectory()) continue;
-			const candidate = path.join(root, projectEntry.name, id);
-			if (candidate !== localDir && fs.existsSync(candidate)) duplicates.push(candidate);
-		}
-	} catch {}
-
-	return { id, action, path: localFile, cwd: effectiveCwd || null, duplicates };
 }
