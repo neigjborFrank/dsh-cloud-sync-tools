@@ -1,4 +1,5 @@
-﻿// v2 璐ㄩ噺闂ㄧ锛氭枃浠惰妯°€佷緷璧栨柟鍚戙€佸墠绔帴鍙ｃ€佺増鏈竴鑷存€?// 杩愯锛歯ode tools/v2/check.mjs
+// v2 质量门禁：文件规模、依赖方向、前端接口、版本一致性
+// 运行：node tools/v2/check.mjs
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,7 +22,7 @@ const walk = (dir, out = []) => {
 const rel = (file) => path.relative(pluginRoot, file).replace(/\\/g, "/");
 const lines = (file) => fs.readFileSync(file, "utf8").split("\n").length;
 
-// 1) 鏂囦欢瑙勬ā
+// 1) 文件规模（client.js 为单文件 UI，上限单独放宽）
 const LIMITS = { "client.js": 850, "index.js": 100, default: 350 };
 const oversized = [];
 for (const file of walk(pluginRoot)) {
@@ -30,42 +31,43 @@ for (const file of walk(pluginRoot)) {
 	const count = lines(file);
 	if (count > limit) oversized.push({ name, count, limit });
 }
-check("鏂囦欢瑙勬ā涓嶈秴杩囩害瀹氫笂闄?, oversized.length === 0, oversized.length ? JSON.stringify(oversized) : "OK");
+check("文件规模不超过约定上限", oversized.length === 0, oversized.length ? JSON.stringify(oversized) : "OK");
 
-// 2) 渚濊禆鏂瑰悜
+// 2) 依赖方向
 const coreFiles = walk(path.join(pluginRoot, "lib", "core"));
 const hostFiles = walk(path.join(pluginRoot, "lib", "host"));
 const violations = [];
 for (const file of coreFiles) {
 	const text = fs.readFileSync(file, "utf8");
-	if (text.includes("../host/") || text.includes("client.js")) violations.push(`${rel(file)} 寮曠敤浜?host/client`);
+	if (text.includes("../host/") || text.includes("client.js")) violations.push(`${rel(file)} 引用了 host/client`);
 }
 for (const file of hostFiles) {
 	const text = fs.readFileSync(file, "utf8");
-	if (text.includes("../client") || text.includes('"../../client.js"')) violations.push(`${rel(file)} 寮曠敤浜?client`);
+	if (text.includes("../client") || text.includes('"../../client.js"')) violations.push(`${rel(file)} 引用了 client`);
 }
-check("妯″潡渚濊禆鏂瑰悜姝ｇ‘锛坈ore 涓嶄緷璧?host/client锛?, violations.length === 0, violations.length ? violations.join("; ") : "OK");
+check("模块依赖方向正确（core 不依赖 host/client）", violations.length === 0, violations.length ? violations.join("; ") : "OK");
 
-// 3) 鍓嶇鍙敤 v2 鎺ュ彛
+// 3) 前端只用 v2 接口
 const client = fs.readFileSync(path.join(pluginRoot, "client.js"), "utf8");
 const requiredEndpoints = ["/api/health", "/token", "/api/tree", "/api/repos", "/api/repos/remove", "/api/upload-project", "/api/download-project", "/api/pick-directory", "/api/cloud-view"];
 const missing = requiredEndpoints.filter((endpoint) => !client.includes(endpoint));
 const removedEndpoints = ["/api/check", "/api/diff", "/api/upload-sessions", "/api/github-status", "/api/repos/create"];
 const stale = removedEndpoints.filter((endpoint) => client.includes(endpoint));
-check("鍓嶇鍙娇鐢?v2 鎺ュ彛", missing.length === 0 && stale.length === 0, JSON.stringify({ missing, stale }));
-check("鍓嶇淇濈暀 __ModuleLoader__ 鍔犺浇", client.includes("__ModuleLoader__") && client.includes("_footerActions"));
+check("前端只使用 v2 接口", missing.length === 0 && stale.length === 0, JSON.stringify({ missing, stale }));
+check("前端保留 __ModuleLoader__ 加载", client.includes("__ModuleLoader__") && client.includes("_footerActions"));
 
-// 4) 鐗堟湰涓€鑷存€?const version = fs.readFileSync(path.join(root, "VERSION"), "utf8").trim();
+// 4) 版本一致性
+const version = fs.readFileSync(path.join(root, "VERSION"), "utf8").trim();
 const pkg = JSON.parse(fs.readFileSync(path.join(pluginRoot, "package.json"), "utf8"));
-check("VERSION 涓?package.json 鐗堟湰涓€鑷?, version === pkg.version, `${version} / ${pkg.version}`);
+check("VERSION 与 package.json 版本一致", version === pkg.version, `${version} / ${pkg.version}`);
 
-// 5) 鍏ュ彛瀵煎嚭
+// 5) 入口导出
 const entry = fs.readFileSync(path.join(pluginRoot, "index.js"), "utf8");
-check("index.js 瀵煎嚭 apply", entry.includes("export async function apply") || entry.includes("export function apply"));
-check("apply 蹇呴』鏄悓姝ュ嚱鏁帮紙DSH 鐢熷懡鍛ㄦ湡濂戠害锛?, !entry.includes("export async function apply") && entry.includes("export function apply"));
+check("index.js 导出 apply", entry.includes("export async function apply") || entry.includes("export function apply"));
+check("apply 必须是同步函数（DSH 生命周期契约）", !entry.includes("export async function apply") && entry.includes("export function apply"));
 const entryCode = entry.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-check("apply 鎵€鍦ㄥ叆鍙ｄ笉鍑虹幇 await锛堟敞鍐?effect 蹇呴』鍚屾锛?, !/\bawait\b/.test(entryCode));
+check("apply 所在入口不出现 await（注册 effect 必须同步）", !/\bawait\b/.test(entryCode));
 
 const failed = results.filter((item) => !item.pass);
-console.log(`\n璐ㄩ噺闂ㄧ锛?{results.length - failed.length}/${results.length} 閫氳繃`);
+console.log(`\n质量门禁：${results.length - failed.length}/${results.length} 通过`);
 process.exitCode = failed.length ? 1 : 0;
