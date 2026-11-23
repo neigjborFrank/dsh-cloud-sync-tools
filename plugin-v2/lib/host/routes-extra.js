@@ -103,7 +103,7 @@ export function createExtraRoutes(ctx) {
 			const workspaceRegistry = getService(ctx, "workspaceRegistry");
 			if (workspaceRegistry && typeof workspaceRegistry.create === "function") {
 				let record = null;
-				if (typeof workspaceRegistry.resolveByPath === "function") record = workspaceRegistry.resolveByPath(target) || null;
+				if (typeof workspaceRegistry.resolveByPath === "function") record = (await workspaceRegistry.resolveByPath(target)) || null;
 				if (!record) record = await workspaceRegistry.create(target, title);
 				return { ok: true, mode: "official", existing: Boolean(record), workspace: record ? { id: record.id || "", title: record.title || title, path: target } : null };
 			}

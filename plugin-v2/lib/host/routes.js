@@ -244,7 +244,7 @@ export function createRoutes(ctx) {
 					const workspaceRegistry = getService(ctx, "workspaceRegistry");
 					let workspaceRecord = null;
 					if (workspaceRegistry && typeof workspaceRegistry.resolveByPath === "function") {
-						workspaceRecord = workspaceRegistry.resolveByPath(targetDir) || null;
+						workspaceRecord = (await workspaceRegistry.resolveByPath(targetDir)) || null;
 					}
 					if (!workspaceRecord && workspaceRegistry && typeof workspaceRegistry.create === "function") {
 						workspaceRecord = await workspaceRegistry.create(targetDir, title);
