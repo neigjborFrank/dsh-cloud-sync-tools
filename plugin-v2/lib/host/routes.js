@@ -250,8 +250,17 @@ export function createRoutes(ctx) {
 						workspaceRecord = await workspaceRegistry.create(targetDir, title);
 					}
 					if (workspaceRecord) {
-						registration = { mode: "official", ok: true, workspaceId: workspaceRecord.id || null, title };
-						lines.push(`已通过 DSH 官方服务登记工作区：${title}`);
+						let attached = 0;
+						if (typeof workspaceRecord.attachSession === "function") {
+							for (const session of downloaded) {
+								try {
+									await workspaceRecord.attachSession(session.id);
+									attached++;
+								} catch {}
+							}
+						}
+						registration = { mode: "official", ok: true, workspaceId: workspaceRecord.id || null, title, attached };
+						lines.push(`已通过 DSH 官方服务登记工作区：${title}${attached ? `（挂载 ${attached} 个会话）` : ""}`);
 					} else {
 						const fallback = registerWorkspace(targetDir, title, downloaded.map((item) => item.id));
 						registration = { mode: "file", ...fallback, title };

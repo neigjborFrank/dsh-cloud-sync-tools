@@ -4,6 +4,8 @@ import path from "node:path";
 
 import { AppError } from "../shared.js";
 import { readRegistry, registerWorkspace, removeWorkspaces } from "../core/registry.js";
+import { listSessions } from "../core/session.js";
+import { samePath } from "../core/layout.js";
 import { pickFolderWindows, windowsPickerAvailable } from "./folder-picker.js";
 import { PLUGIN_VERSION, getService } from "./services.js";
 
@@ -105,7 +107,24 @@ export function createExtraRoutes(ctx) {
 				let record = null;
 				if (typeof workspaceRegistry.resolveByPath === "function") record = (await workspaceRegistry.resolveByPath(target)) || null;
 				if (!record) record = await workspaceRegistry.create(target, title);
-				return { ok: true, mode: "official", existing: Boolean(record), workspace: record ? { id: record.id || "", title: record.title || title, path: target } : null };
+				// 把 cwd 指向该目录的本地会话挂到工作区账上（DSH 侧边栏按账目分组，仅创建不挂会话会显示"无会话"）
+				const attached = [];
+				if (record && typeof record.attachSession === "function") {
+					for (const session of listSessions()) {
+						if (!session.cwd || !samePath(session.cwd, target)) continue;
+						try {
+							await record.attachSession(session.id);
+							attached.push(session.id);
+						} catch {}
+					}
+				}
+				return {
+					ok: true,
+					mode: "official",
+					existing: Boolean(record),
+					attached,
+					workspace: record ? { id: record.id || "", title: record.title || title, path: target } : null,
+				};
 			}
 			const fallback = registerWorkspace(target, title, []);
 			return { ok: Boolean(fallback.ok), mode: "file", existing: Boolean(fallback.updated), workspace: fallback.ok ? { id: fallback.workspaceId || "", title, path: target } : null, output: fallback.ok ? "已写入注册表（DSH 需刷新/重启）" : fallback.error };
