@@ -22,8 +22,8 @@ const walk = (dir, out = []) => {
 const rel = (file) => path.relative(pluginRoot, file).replace(/\\/g, "/");
 const lines = (file) => fs.readFileSync(file, "utf8").split("\n").length;
 
-// 1) 文件规模（client.js 为单文件 UI，上限单独放宽）
-const LIMITS = { "client.js": 850, "index.js": 100, default: 350 };
+// 1) 文件规模（client.js 为单文件 UI；routes.js 为 HTTP 路由聚合表，上限单独放宽）
+const LIMITS = { "client.js": 850, "lib/host/routes.js": 400, "index.js": 100, default: 350 };
 const oversized = [];
 for (const file of walk(pluginRoot)) {
 	const name = rel(file);
