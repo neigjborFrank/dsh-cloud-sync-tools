@@ -386,12 +386,15 @@ window.__ModuleLoader__.load({
 						`<span class="n"><b>先拉取远端更新</b><span>多设备时推荐：下载前同步远端最新提交</span></span></div>` +
 						`<div class="dsh-csp-sess"><input type="checkbox" id="csp-migrate" checked>` +
 						`<span class="n"><b>迁移会话（清理旧位置副本）</b><span>把旧工作区目录下的同 ID 会话移到 session-trash，避免侧边栏重复</span></span></div>` +
+						`<div class="dsh-csp-sess"><input type="checkbox" id="csp-convert" checked>` +
+						`<span class="n"><b>子会话转为普通会话</b><span>父会话不在时自动转普通，否则子会话不会显示在侧边栏</span></span></div>` +
 						`<div class="dsh-csp-foot"><button data-cancel="1">取消</button><button class="go" data-go="1">开始下载</button></div>`;
 
 					const input = picker.querySelector("#csp-target");
 					const withBox = picker.querySelector("#csp-with");
 					const pullBox = picker.querySelector("#csp-pull");
 					const migrateBox = picker.querySelector("#csp-migrate");
+					const convertBox = picker.querySelector("#csp-convert");
 					picker.querySelector("[data-browse]").onclick = async () => {
 						setNote("正在打开系统文件夹选择框…");
 						try {
@@ -420,12 +423,12 @@ window.__ModuleLoader__.load({
 					};
 					picker.querySelector("[data-go]").onclick = () => {
 						// 允许留空：服务端自动在默认目录下创建项目文件夹
-						void doDownload(project, ids, String(input.value || "").trim(), withBox.checked, pullBox.checked, migrateBox.checked);
+						void doDownload(project, ids, String(input.value || "").trim(), withBox.checked, pullBox.checked, migrateBox.checked, convertBox.checked);
 					};
 					place();
 				};
 
-				const doDownload = async (project, ids, targetDir, withWorkspace, pullRemote = true, migrate = true) => {
+				const doDownload = async (project, ids, targetDir, withWorkspace, pullRemote = true, migrate = true, convertSubagent = true) => {
 					await busyRun(async () => {
 						setNote(withWorkspace ? "正在下载并镜像工作区…" : "正在下载会话…");
 						try {
@@ -437,6 +440,7 @@ window.__ModuleLoader__.load({
 								withWorkspace,
 								pull: pullRemote,
 								migrate,
+								convertSubagent,
 							});
 							let text = String(result.output || "");
 							if (result.targetDir) text += `\n目标目录：${result.targetDir}`;

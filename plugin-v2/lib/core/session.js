@@ -31,39 +31,6 @@ export function readHeader(file) {
 	}
 }
 
-/** 改写会话日志首帧的 cwd（其余帧原样保留） */
-export function rewriteSessionCwd(buffer, cwd) {
-	const at = buffer.indexOf(MAGIC);
-	if (at < 0) return buffer;
-	const next = buffer.indexOf(MAGIC, at + 4);
-	const end = next < 0 ? buffer.length : next;
-	let text;
-	try {
-		text = zstdDecompressSync(buffer.subarray(at, end)).toString("utf8");
-	} catch {
-		return buffer;
-	}
-	const lines = text.split("\n");
-	let changed = false;
-	for (let i = 0; i < lines.length; i++) {
-		if (!lines[i].trim()) continue;
-		try {
-			const obj = JSON.parse(lines[i]);
-			if (obj && obj.type === "session") {
-				obj.cwd = cwd;
-				lines[i] = JSON.stringify(obj);
-				changed = true;
-			}
-			break;
-		} catch {
-			continue;
-		}
-	}
-	if (!changed) return buffer;
-	const frame = zstdCompressSync(Buffer.from(lines.join("\n"), "utf8"));
-	return Buffer.concat([buffer.subarray(0, at), frame, buffer.subarray(end)]);
-}
-
 function readTitle(sessionId, home) {
 	try {
 		const file = path.join(home, "storages", "session_projcache", "sessions", `${sessionId}.json`);

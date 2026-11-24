@@ -7,6 +7,7 @@ import test from "node:test";
 import { zstdCompressSync } from "node:zlib";
 
 const sessionModule = await import("../../plugin-v2/lib/core/session.js");
+const sessionDownload = await import("../../plugin-v2/lib/core/session-download.js");
 const layoutModule = await import("../../plugin-v2/lib/core/layout.js");
 const projectKeyOf = layoutModule.projectKeyOf;
 
@@ -76,6 +77,61 @@ test("uploadSession 把 origin/parentSession 写入云端 meta", async () => {
 	assert.equal(meta.origin, "subagent");
 	assert.equal(meta.parentSession, "session-parent-2");
 	assert.equal(meta.delegationDepth, 1);
+});
+
+function writeCloudSession(project, sessionId, header) {
+	const dir = path.join(repoRoot, "index", "projects", project, "sessions", sessionId);
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(
+		path.join(dir, "meta.json"),
+		JSON.stringify({ schema: 1, id: sessionId, title: "cloud", cwd, project, sessionFile: "session.v4.jsonl.zstd", sessionBytes: 10 }),
+	);
+	fs.writeFileSync(path.join(dir, "session.v4.jsonl.zstd"), zstdCompressSync(Buffer.from(`${JSON.stringify(header)}\n`, "utf8")));
+}
+
+test("downloadSession 孤儿子会话自动转普通会话（侧边栏可见）", async () => {
+	fs.rmSync(path.join(repoRoot, "index"), { recursive: true, force: true });
+	const sessionId = "session-orphan";
+	writeCloudSession("proj-dl", sessionId, {
+		type: "session",
+		version: 4,
+		id: sessionId,
+		cwd,
+		origin: "subagent",
+		parentSession: "session-missing-parent",
+		delegationDepth: 1,
+	});
+	const target = path.join(tempRoot, "dl-workspace");
+	fs.mkdirSync(target, { recursive: true });
+	const result = await sessionDownload.downloadSession(repoRoot, sessionId, { targetCwd: target, home, convertSubagent: true });
+	assert.equal(result.converted, true, "父会话不存在时应转换");
+	const header = sessionModule.readHeader(result.path);
+	assert.equal(header.origin, undefined);
+	assert.equal(header.parentSession, undefined);
+	assert.equal(header.cwd, target);
+});
+
+test("downloadSession 父会话存在时保留子会话血缘", async () => {
+	fs.rmSync(path.join(repoRoot, "index"), { recursive: true, force: true });
+	const parentId = "session-parent";
+	const childId = "session-child-keep";
+	writeCloudSession("proj-dl2", parentId, { type: "session", version: 4, id: parentId, cwd });
+	writeCloudSession("proj-dl2", childId, {
+		type: "session",
+		version: 4,
+		id: childId,
+		cwd,
+		origin: "subagent",
+		parentSession: parentId,
+		delegationDepth: 1,
+	});
+	const target = path.join(tempRoot, "dl-workspace2");
+	fs.mkdirSync(target, { recursive: true });
+	const result = await sessionDownload.downloadSession(repoRoot, childId, { targetCwd: target, home, convertSubagent: true });
+	assert.equal(result.converted, false);
+	const header = sessionModule.readHeader(result.path);
+	assert.equal(header.origin, "subagent");
+	assert.equal(header.parentSession, parentId);
 });
 
 test.after(() => {

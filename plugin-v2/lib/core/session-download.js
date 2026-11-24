@@ -2,11 +2,83 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
 
 import { ensureDir, timestamp } from "../shared.js";
 import { projectKeyOf } from "./layout.js";
-import { dshHome, findSessionFile, listCloudSessions, readHeader, rewriteSessionCwd, writeProjCache } from "./session.js";
+import { dshHome, findSessionFile, listCloudSessions, readHeader, writeProjCache } from "./session.js";
 import { projectDir } from "./layout.js";
+
+const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+
+/** 改写会话日志首帧 header（其余帧原样保留） */
+export function rewriteSessionHeader(buffer, mutate) {
+	const at = buffer.indexOf(MAGIC);
+	if (at < 0) return buffer;
+	const next = buffer.indexOf(MAGIC, at + 4);
+	const end = next < 0 ? buffer.length : next;
+	let text;
+	try {
+		text = zstdDecompressSync(buffer.subarray(at, end)).toString("utf8");
+	} catch {
+		return buffer;
+	}
+	const lines = text.split("\n");
+	let changed = false;
+	for (let i = 0; i < lines.length; i++) {
+		if (!lines[i].trim()) continue;
+		try {
+			const obj = JSON.parse(lines[i]);
+			if (obj && obj.type === "session") {
+				if (mutate(obj) !== false) {
+					lines[i] = JSON.stringify(obj);
+					changed = true;
+				}
+			}
+			break;
+		} catch {
+			continue;
+		}
+	}
+	if (!changed) return buffer;
+	const frame = zstdCompressSync(Buffer.from(lines.join("\n"), "utf8"));
+	return Buffer.concat([buffer.subarray(0, at), frame, buffer.subarray(end)]);
+}
+
+/** 改写会话日志首帧的 cwd（其余帧原样保留） */
+export function rewriteSessionCwd(buffer, cwd) {
+	return rewriteSessionHeader(buffer, (header) => {
+		header.cwd = cwd;
+		return true;
+	});
+}
+
+/**
+ * 子会话转普通会话：去掉 origin/parentSession/delegationDepth 血缘标记。
+ * 用于父会话不存在（本地与云端都找不到）的孤儿子会话，否则 DSH 侧边栏永远不显示。
+ */
+export function normalizeSubagentHeader(buffer) {
+	return rewriteSessionHeader(buffer, (header) => {
+		delete header.origin;
+		delete header.parentSession;
+		header.delegationDepth = 0;
+		return true;
+	});
+}
+
+/** 父会话是否在本机或云端存在 */
+function parentSessionAvailable(repoRoot, home, parentId) {
+	if (!parentId) return false;
+	if (listCloudSessions(repoRoot).some((session) => session.id === parentId)) return true;
+	try {
+		const root = path.join(home, "sessions");
+		for (const projectEntry of fs.readdirSync(root, { withFileTypes: true })) {
+			if (!projectEntry.isDirectory()) continue;
+			if (fs.existsSync(path.join(root, projectEntry.name, parentId))) return true;
+		}
+	} catch {}
+	return false;
+}
 
 /** 同一会话 id 在其它 projectKey 目录下的副本 */
 function collectSessionDuplicates(home, id, localDir) {
@@ -70,14 +142,26 @@ export async function downloadSession(repoRoot, id, options = {}) {
 	const migrate = options.migrate !== false && Boolean(targetCwd);
 	const duplicatesIn = collectSessionDuplicates(home, id, localDir);
 	const finish = async (result) => {
-		if (!migrate || !duplicatesIn.length) return { ...result, duplicates: duplicatesIn };
+		const base = { ...result, converted: convertSubagent };
+		if (!migrate || !duplicatesIn.length) return { ...base, duplicates: duplicatesIn };
 		const cleaned = await migrateSessionDuplicates(home, duplicatesIn);
 		const cleanedFrom = new Set(cleaned.map((item) => item.from));
-		return { ...result, cleaned, duplicates: duplicatesIn.filter((dir) => !cleanedFrom.has(dir)) };
+		return { ...base, cleaned, duplicates: duplicatesIn.filter((dir) => !cleanedFrom.has(dir)) };
 	};
+
+	// 血缘保护：重新下载不能把本地"普通会话"降级为隐藏的子会话；
+	// 孤儿子会话（父会话本地/云端都不存在）默认转为普通会话，否则侧边栏永远不显示。
+	const cloudHeader = readHeader(srcFile) || {};
+	const localHeader = fs.existsSync(localFile) ? readHeader(localFile) : null;
+	let convertSubagent = false;
+	if (cloudHeader.origin === "subagent" && options.convertSubagent !== false) {
+		if (localHeader && localHeader.origin !== "subagent") convertSubagent = true;
+		else if (!parentSessionAvailable(repoRoot, home, cloudHeader.parentSession)) convertSubagent = true;
+	}
 
 	let payload = fs.readFileSync(srcFile);
 	if (targetCwd) payload = rewriteSessionCwd(payload, targetCwd);
+	if (convertSubagent) payload = normalizeSubagentHeader(payload);
 
 	let action = "written";
 	if (fs.existsSync(localFile)) {

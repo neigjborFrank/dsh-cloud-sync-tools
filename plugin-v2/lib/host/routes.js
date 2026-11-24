@@ -231,11 +231,20 @@ export function createRoutes(ctx) {
 
 			const downloaded = [];
 			const subagentParents = new Set();
+			let converted = 0;
 			for (const id of ids) {
 				try {
-					const result = await downloadSession(repo.path, id, { targetCwd: targetDir, migrate: body.migrate !== false });
+					const result = await downloadSession(repo.path, id, {
+						targetCwd: targetDir,
+						migrate: body.migrate !== false,
+						convertSubagent: body.convertSubagent !== false,
+					});
 					downloaded.push(result);
 					lines.push(result.action === "skipped" ? `- 会话 ${id}：本地已一致` : `✓ 会话 ${id}（${result.action}）`);
+					if (result.converted) {
+						converted++;
+						lines.push(`- 会话 ${id}：子会话已转为普通会话（父会话不在，转换后会在侧边栏显示）`);
+					}
 					if (result.cleaned && result.cleaned.length) {
 						lines.push(`- 已迁移旧位置副本 ${result.cleaned.length} 份（移到 %DSH_HOME%\\cloud-sync\\session-trash）`);
 					}
@@ -247,7 +256,7 @@ export function createRoutes(ctx) {
 			}
 			if (subagentParents.size) {
 				lines.push(
-					`⚠ 其中包含子会话（origin=subagent）：DSH 侧边栏默认只显示普通会话，需要父会话 ${[...subagentParents].join(", ")} 才能在界面看到主对话`,
+					`⚠ 其中包含子会话（origin=subagent）：DSH 侧边栏默认只显示普通会话，需要父会话 ${[...subagentParents].join(", ")} 才能在界面显示；可勾选「子会话转为普通会话」`,
 				);
 			}
 
