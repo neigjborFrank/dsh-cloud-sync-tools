@@ -72,6 +72,7 @@ export function buildTree(repos) {
 			archived: Boolean(session.archived),
 			bytes: session.bytes,
 			modified: session.modified,
+			subagent: Boolean(session.isSubagent),
 			cloud: cloudSessions.get(session.id) || null,
 		});
 	}
@@ -83,7 +84,15 @@ export function buildTree(repos) {
 	for (const session of cloudSessions.values()) {
 		const row = ensure(session.cwd);
 		if (row.sessions.some((item) => item.id === session.id)) continue;
-		row.sessions.push({ id: session.id, title: session.title, archived: false, bytes: session.sessionBytes, modified: 0, cloud: session });
+		row.sessions.push({
+			id: session.id,
+			title: session.title,
+			archived: false,
+			bytes: session.sessionBytes,
+			modified: 0,
+			subagent: Boolean(session.isSubagent),
+			cloud: session,
+		});
 	}
 
 	return { suggestedBase: "", bindings, projects: [...byName.values()] };
@@ -167,12 +176,21 @@ export async function buildCloudView(repos) {
 					title: session.title,
 					archived: Boolean(session.archived),
 					state: cloud ? "synced" : session.archived ? "archived" : "local-only",
+					subagent: Boolean(session.isSubagent),
+					parentSession: session.parentSession || "",
 				});
 				if (!cloud && !session.archived) totals.pendingSessions++;
 			}
 			for (const session of cloudSessionsOfProject) {
 				if (localOfProject.some((item) => item.id === session.id)) continue;
-				sessionRows.push({ id: session.id, title: session.title, archived: false, state: "cloud-only" });
+				sessionRows.push({
+					id: session.id,
+					title: session.title,
+					archived: false,
+					state: "cloud-only",
+					subagent: Boolean(session.isSubagent),
+					parentSession: session.parentSession || "",
+				});
 			}
 
 			projects.push({

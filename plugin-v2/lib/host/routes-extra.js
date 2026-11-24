@@ -164,6 +164,49 @@ export function createExtraRoutes(ctx) {
 			return pickWithDshPicker(ctx, body, probeOnly);
 		},
 
+		"GET /api/dsh-diag": async () => {
+			const registry = getService(ctx, "workspaceRegistry");
+			const persistence = getService(ctx, "sessionPersistence");
+			const sessions = getService(ctx, "sessions");
+			const workspaces = [];
+			const known = {};
+			if (registry && typeof registry.list === "function") {
+				for (const entry of registry.list()) {
+					let ids = [];
+					try {
+						ids = Array.isArray(entry.sessionIds) ? [...entry.sessionIds] : [];
+					} catch {}
+					workspaces.push({ id: entry.id, title: entry.title, path: entry.path, sessionIds: ids });
+					if (typeof registry.sessionKnown === "function") {
+						for (const id of ids) {
+							try {
+								known[id] = await registry.sessionKnown(id);
+							} catch (error) {
+								known[id] = `error:${error.message}`;
+							}
+						}
+					}
+				}
+			}
+			let persisted = null;
+			if (persistence && typeof persistence.list === "function") {
+				try {
+					persisted = (await persistence.list()).map((snapshot) => ({ id: snapshot.header && snapshot.header.id, cwd: snapshot.header && snapshot.header.cwd }));
+				} catch (error) {
+					persisted = `error:${error.message}`;
+				}
+			}
+			let live = null;
+			if (sessions && typeof sessions.list === "function") {
+				try {
+					live = sessions.list().map((session) => ({ id: session.id, cwd: session.header && session.header.cwd }));
+				} catch (error) {
+					live = `error:${error.message}`;
+				}
+			}
+			return { ok: true, workspaces, known, persisted, live };
+		},
+
 		"GET /api/workspaces": () => listWorkspaces(ctx),
 
 		"POST /api/workspaces/remove": async (body) => {

@@ -134,6 +134,10 @@ export function listSessions(home = dshHome()) {
 				bytes,
 				modified,
 				title: readTitle(sessionEntry.name, home),
+				origin: header.origin || "",
+				parentSession: header.parentSession || "",
+				delegationDepth: Number(header.delegationDepth || 0) || 0,
+				isSubagent: header.origin === "subagent",
 			});
 		}
 	}
@@ -190,6 +194,16 @@ export function findSessionFile(dir) {
 	}
 }
 
+/** 读取云端会话目录里的 header（用于识别子会话 lineage） */
+function readCloudSessionHeader(dir, meta) {
+	try {
+		const file = meta && meta.sessionFile ? path.join(dir, meta.sessionFile) : findSessionFile(dir);
+		return file ? readHeader(file) : null;
+	} catch {
+		return null;
+	}
+}
+
 /** 列出云端会话（扫描 index 项目 sessions/，兼容 v1） */
 export function listCloudSessions(repoRoot) {
 	const out = [];
@@ -204,14 +218,20 @@ export function listCloudSessions(repoRoot) {
 			const dir = path.join(project.dir, "sessions", entry.name);
 			const meta = readJson(path.join(dir, "meta.json"));
 			if (!meta) continue;
+			const header = readCloudSessionHeader(dir, meta) || {};
+			const origin = header.origin || meta.origin || "";
 			out.push({
 				id: entry.name,
 				project: project.name,
-				cwd: meta.cwd || "",
+				cwd: meta.cwd || header.cwd || "",
 				title: meta.title || "",
 				scope: meta.scope || "",
 				uploadedAt: meta.uploadedAt || null,
 				sessionBytes: meta.sessionBytes || 0,
+				origin,
+				parentSession: header.parentSession || meta.parentSession || "",
+				delegationDepth: Number(header.delegationDepth ?? meta.delegationDepth ?? 0) || 0,
+				isSubagent: origin === "subagent",
 			});
 		}
 	}
@@ -270,6 +290,9 @@ export async function uploadSession({ repoRoot, id, cwd, projectName: projectOve
 		sessionFile: fileName,
 		sessionBytes: fs.statSync(srcFile).size,
 		uploadedAt: new Date().toISOString(),
+		origin: header.origin || "",
+		parentSession: header.parentSession || "",
+		delegationDepth: Number(header.delegationDepth || 0) || 0,
 	};
 	writeJsonAtomic(path.join(destDir, "meta.json"), sessionMeta);
 

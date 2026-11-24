@@ -11,7 +11,7 @@ import { findProject, listProjects } from "../core/project.js";
 import { addRepo, defaultRepo, findRepo, listBindings, listRepos, publicRepos, removeRepo, setBinding } from "../core/repo.js";
 import { registerWorkspace, repairRegistry, validateRegistry, readRegistry } from "../core/registry.js";
 import { downloadSession } from "../core/session-download.js";
-import { listCloudSessions, listSessions, uploadSession } from "../core/session.js";
+import { listCloudSessions, listSessions, readHeader, uploadSession } from "../core/session.js";
 import { createExtraRoutes } from "./routes-extra.js";
 import { getService } from "./services.js";
 import { buildCloudView, buildTree } from "./views.js";
@@ -153,6 +153,8 @@ export function createRoutes(ctx) {
 			if (!lfsReady && num(result.large) > 0) lines.push(`⚠ git-lfs 不可用，${result.large} 个大文件只记录清单`);
 			lines.push(`项目 ${result.projectName}：文件 ${num(result.files)}，变更 ${num(result.changed)} / 增 ${num(result.added)} / 删 ${num(result.removed)}${num(result.large) ? `，大文件 ${result.large}` : ""}`);
 
+			const parentSessions = new Set();
+			const localById = new Map(listSessions().map((item) => [item.id, item]));
 			for (const id of ids) {
 				try {
 					const uploaded = await uploadSession({
@@ -163,9 +165,14 @@ export function createRoutes(ctx) {
 						scope: result.scope || "",
 					});
 					lines.push(uploaded.ok ? `✓ 会话 ${id}` : `✗ 会话 ${id}: ${uploaded.error}`);
+					const local = localById.get(id);
+					if (local && local.isSubagent) parentSessions.add(local.parentSession || "(未知父会话)");
 				} catch (error) {
 					lines.push(`✗ 会话 ${id}: ${error.message}`);
 				}
+			}
+			if (parentSessions.size) {
+				lines.push(`⚠ 其中有子会话（origin=subagent）：DSH 侧边栏默认只显示普通会话，建议同时在设备上上传父会话 ${[...parentSessions].join(", ")}`);
 			}
 
 			const commit = await commitAndPush(repo.path, `archive: 上传工作区与 ${ids.length} 个会话`);
@@ -223,6 +230,7 @@ export function createRoutes(ctx) {
 			}
 
 			const downloaded = [];
+			const subagentParents = new Set();
 			for (const id of ids) {
 				try {
 					const result = await downloadSession(repo.path, id, { targetCwd: targetDir, migrate: body.migrate !== false });
@@ -231,9 +239,16 @@ export function createRoutes(ctx) {
 					if (result.cleaned && result.cleaned.length) {
 						lines.push(`- 已迁移旧位置副本 ${result.cleaned.length} 份（移到 %DSH_HOME%\\cloud-sync\\session-trash）`);
 					}
+					const header = result.path ? readHeader(result.path) : null;
+					if (header && header.origin === "subagent") subagentParents.add(header.parentSession || "(未知父会话)");
 				} catch (error) {
 					lines.push(`✗ 会话 ${id}: ${error.message}`);
 				}
+			}
+			if (subagentParents.size) {
+				lines.push(
+					`⚠ 其中包含子会话（origin=subagent）：DSH 侧边栏默认只显示普通会话，需要父会话 ${[...subagentParents].join(", ")} 才能在界面看到主对话`,
+				);
 			}
 
 			let registration = null;

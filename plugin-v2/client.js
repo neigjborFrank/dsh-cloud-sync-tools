@@ -282,8 +282,8 @@ window.__ModuleLoader__.load({
 							(session) =>
 								`<div class="dsh-csp-sess"><input type="checkbox" data-sid="${escapeHtml(session.id)}" ` +
 								`${session.archived ? "disabled" : "checked"}>` +
-								`<span class="n"><b>${escapeHtml(session.title || "(无标题)")}</b>` +
-								`<span>${fmtMB(session.bytes)} · ${session.cloud ? "云端已有" : "云端无"}${session.archived ? " · 已归档" : ""}</span></span></div>`,
+								`<span class="n"><b>${session.subagent ? "〔子会话〕" : ""}${escapeHtml(session.title || "(无标题)")}</b>` +
+								`<span>${fmtMB(session.bytes)} · ${session.cloud ? "云端已有" : "云端无"}${session.archived ? " · 已归档" : ""}${session.subagent ? " · 子会话（侧边栏默认不显示）" : ""}</span></span></div>`,
 						)
 						.join("");
 					picker.innerHTML =
@@ -589,7 +589,7 @@ window.__ModuleLoader__.load({
 										.map(
 											(session) =>
 												`<div class="dsh-csp-cv-sess"><span class="ico">💬</span>` +
-												`<span class="nm">${escapeHtml(session.title || "(无标题)")}</span>` +
+												`<span class="nm">${session.subagent ? "〔子会话〕" : ""}${escapeHtml(session.title || "(无标题)")}</span>` +
 												`<span class="dsh-csp-cv-state ${sessionStatusClass(session.state)}">${escapeHtml(sessionStatusText(session.state))}</span></div>`,
 										)
 										.join("") +
