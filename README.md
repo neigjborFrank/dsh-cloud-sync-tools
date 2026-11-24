@@ -45,6 +45,8 @@ git clone https://github.com/neigjborFrank/dsh-cloud-sync-tools.git C:\Users\<�
 
 **下载位置**：默认下载到 `%USERPROFILE%\Documents\deepseek-harness\workspaces\<项目名>`，目录不存在时自动创建；下载对话框点「选择文件夹…」会弹出 Windows 标准的"浏览文件夹"窗口，也可留空直接使用默认目录。
 
+> **子会话（origin=subagent）**：DSH 侧边栏默认只显示普通会话；云端若只有子会话（父会话未上传），下载后工作区可见但会话不会出现在侧边栏。插件会在云端视图标记「子会话」并提示父会话 ID。
+
 > **工作区登记**：下载/登记工作区走 DSH 官方 `workspaceRegistry`，并对该目录下的会话执行 `attachSession` 挂载；侧边栏显示"工作区下无会话"时通常是登记未完成，重新下载或点「登记工作区」即可。
 
 > **会话与工作区分开存放**：工作区文件写到所选目录；会话始终保存在 `%DSH_HOME%\sessions\<cwd 路径键>\<会话ID>\`。下载到新工作区时默认「迁移会话」：旧位置的同 ID 副本会被移到 `%DSH_HOME%\cloud-sync\session-trash\`（可恢复），避免同一会话在磁盘上出现两份。
