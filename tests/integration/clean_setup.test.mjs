@@ -108,6 +108,7 @@ const toUrl = (relative) => pathToFileURL(path.join(pluginDir, relative)).href;
 const layout = await import(toUrl("lib/core/layout.js"));
 const project = await import(toUrl("lib/core/project.js"));
 const session = await import(toUrl("lib/core/session.js"));
+const sessionDownload = await import(toUrl("lib/core/session-download.js"));
 const download = await import(toUrl("lib/core/download.js"));
 
 const projects = project.listProjects(device2);
@@ -134,7 +135,7 @@ check("E13 中文文件名内容一致", fs.readFileSync(path.join(target, "docs
 
 // 5) 模拟第二设备下载会话（cwd 改写）
 const home2 = path.join(base, "home2");
-const downloadedSession = await session.downloadSession(device2, sid, { targetCwd: target, home: home2 });
+const downloadedSession = await sessionDownload.downloadSession(device2, sid, { targetCwd: target, home: home2 });
 const localFile = path.join(home2, "sessions", layout.projectKeyOf(target), sid, "session.v4.jsonl.zstd");
 const header = (() => {
 	const buf = fs.readFileSync(localFile);
