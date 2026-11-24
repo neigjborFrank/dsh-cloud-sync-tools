@@ -100,6 +100,8 @@ test("downloadSession 孤儿子会话自动转普通会话（侧边栏可见）"
 		origin: "subagent",
 		parentSession: "session-missing-parent",
 		delegationDepth: 1,
+		createdAt: 1793606885139,
+		isSeeded: false,
 	});
 	const target = path.join(tempRoot, "dl-workspace");
 	fs.mkdirSync(target, { recursive: true });
@@ -109,6 +111,16 @@ test("downloadSession 孤儿子会话自动转普通会话（侧边栏可见）"
 	assert.equal(header.origin, undefined);
 	assert.equal(header.parentSession, undefined);
 	assert.equal(header.cwd, target);
+	// 侧边栏标题缓存：identity 必须与会话头匹配，否则 DSH 显示"未命名"
+	const cacheFile = path.join(home, "storages", "session_projcache", "sessions", `${sessionId}.json`);
+	const cache = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+	assert.equal(cache.version, 7);
+	assert.equal(cache.record.identity.createdAt, header.createdAt, "createdAt 必须取自会话头");
+	assert.equal(cache.record.identity.cwd, target);
+	assert.equal(cache.record.identity.formatVersion, Number(header.version), "formatVersion 必须与会话头一致");
+	assert.equal(cache.record.rows.title.ver, 1);
+	assert.equal(cache.record.rows.title.val, "cloud");
+	assert.ok(cache.record.rows.sessionListMetadata, "应写 sessionListMetadata");
 });
 
 test("downloadSession 父会话存在时保留子会话血缘", async () => {

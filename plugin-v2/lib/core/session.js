@@ -205,23 +205,78 @@ export function listCloudSessions(repoRoot) {
 	return out;
 }
 
-export function writeProjCache(sessionId, cwd, home, title = "") {
+/** 读取会话日志：header、最后一个事件 seq、事件数（多帧解压） */
+export function readSessionLogInfo(file) {
 	try {
-		const file = path.join(home, "storages", "session_projcache", "sessions", `${sessionId}.json`);
-		let payload = readJson(file);
-		if (!payload) {
-			payload = {
-				version: 7,
-				record: {
-					identity: { formatVersion: 4, createdAt: Date.now(), cwd, isSeeded: false, inheritedEventCount: 0 },
-					rows: title ? { title: { ver: 1, seq: 1, val: title } } : {},
-				},
-			};
-		} else {
-			payload.record ||= {};
-			payload.record.identity ||= {};
-			payload.record.identity.cwd = cwd;
+		const buf = fs.readFileSync(file);
+		let start = 0;
+		let header = null;
+		let lastSeq = -1;
+		let eventCount = 0;
+		let title = "";
+		while (start < buf.length) {
+			const at = buf.indexOf(MAGIC, start);
+			if (at < 0) break;
+			const next = buf.indexOf(MAGIC, at + 4);
+			const end = next < 0 ? buf.length : next;
+			let text;
+			try {
+				text = zstdDecompressSync(buf.subarray(at, end)).toString("utf8");
+			} catch {
+				break;
+			}
+			for (const line of text.split("\n")) {
+				if (!line.trim()) continue;
+				try {
+					const event = JSON.parse(line);
+					if (!header && event.type === "session") header = event;
+					else {
+						eventCount++;
+						if (typeof event.seq === "number" && event.seq > lastSeq) lastSeq = event.seq;
+						if (event.type === "session/title") {
+							const value = event.data && (event.data.title || event.data.val);
+							if (typeof value === "string" && value.trim()) title = value.trim();
+						}
+					}
+				} catch {}
+			}
+			start = end;
 		}
+		return { header, lastSeq: lastSeq >= 0 ? lastSeq : 0, eventCount, title };
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * 写 DSH 侧边栏标题/列表投影缓存（session_projcache，version 7）。
+ * 关键：DSH 只接受 identity（formatVersion/createdAt/cwd/isSeeded）与会话头**完全匹配**的记录，
+ * 否则标题显示"未命名"，直到打开会话后 DSH 重建缓存。因此 identity 必须取自会话头而非当前时间。
+ */
+export function writeProjCache(sessionId, options = {}) {
+	try {
+		const home = options.home || dshHome();
+		const header = options.header || {};
+		const cwd = options.cwd || header.cwd || "";
+		const title = options.title || "";
+		const lastSeq = Number.isFinite(options.lastSeq) ? Number(options.lastSeq) : 0;
+		const file = path.join(home, "storages", "session_projcache", "sessions", `${sessionId}.json`);
+		const payload = {
+			version: 7,
+			record: {
+				identity: {
+					formatVersion: Number(header.version || 4),
+					createdAt: Number(header.createdAt || 0),
+					cwd,
+					isSeeded: Boolean(header.isSeeded),
+					inheritedEventCount: Number(header.inheritedEventCount || 0),
+				},
+				rows: {
+					title: title ? { ver: 1, seq: lastSeq, val: title } : undefined,
+					sessionListMetadata: { ver: 1, seq: lastSeq, val: { blank: false, lastPromptAt: null } },
+				},
+			},
+		};
 		writeJsonAtomic(file, payload);
 	} catch {}
 }
@@ -237,6 +292,7 @@ export async function uploadSession({ repoRoot, id, cwd, projectName: projectOve
 	if (!srcFile) return { id, ok: false, error: "会话文件缺失" };
 
 	const header = readHeader(srcFile) || {};
+	const logInfo = readSessionLogInfo(srcFile);
 	const effectiveCwd = header.cwd || cwd || "";
 	if (!effectiveCwd) return { id, ok: false, error: "会话没有工作区路径" };
 
@@ -250,7 +306,7 @@ export async function uploadSession({ repoRoot, id, cwd, projectName: projectOve
 	const sessionMeta = {
 		schema: 1,
 		id,
-		title: readTitle(id, home),
+		title: readTitle(id, home) || (logInfo && logInfo.title) || "",
 		cwd: effectiveCwd,
 		project: targetProject,
 		scope: scope || "",

@@ -6,7 +6,7 @@ import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
 
 import { ensureDir, timestamp } from "../shared.js";
 import { projectKeyOf } from "./layout.js";
-import { dshHome, findSessionFile, listCloudSessions, readHeader, writeProjCache } from "./session.js";
+import { dshHome, findSessionFile, listCloudSessions, readHeader, readSessionLogInfo, writeProjCache } from "./session.js";
 import { projectDir } from "./layout.js";
 
 const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
@@ -166,7 +166,11 @@ export async function downloadSession(repoRoot, id, options = {}) {
 	let action = "written";
 	if (fs.existsSync(localFile)) {
 		if (payload.equals(fs.readFileSync(localFile))) {
-			if (targetCwd) writeProjCache(id, targetCwd, home);
+			if (targetCwd) {
+				const info = readSessionLogInfo(localFile);
+				const title = cloud.title || (info && info.title) || "";
+				writeProjCache(id, { home, cwd: effectiveCwd || "", title, header: info?.header, lastSeq: info?.lastSeq });
+			}
 			return finish({ id, action: "skipped", path: localFile, cwd: effectiveCwd || null });
 		}
 		if (options.overwrite !== false) {
@@ -178,6 +182,8 @@ export async function downloadSession(repoRoot, id, options = {}) {
 	}
 
 	await fsp.writeFile(localFile, payload);
-	writeProjCache(id, effectiveCwd || "", home, cloud.title);
+	const logInfo = readSessionLogInfo(localFile);
+	const title = cloud.title || (logInfo && logInfo.title) || "";
+	writeProjCache(id, { home, cwd: effectiveCwd || "", title, header: logInfo?.header, lastSeq: logInfo?.lastSeq });
 	return finish({ id, action, path: localFile, cwd: effectiveCwd || null });
 }

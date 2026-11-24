@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-cloud-sync-panel",
-  "version": "2.0.0-alpha.17",
+  "version": "2.0.0-alpha.18",
   "private": true,
   "description": "DSH cloud sync panel v2 (rewrite): archive workspaces and sessions to user's private Git repositories.",
   "type": "module",
