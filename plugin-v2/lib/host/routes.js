@@ -11,7 +11,7 @@ import { findProject, listProjects } from "../core/project.js";
 import { addRepo, defaultRepo, findRepo, listBindings, listRepos, publicRepos, removeRepo, setBinding } from "../core/repo.js";
 import { registerWorkspace, repairRegistry, validateRegistry, readRegistry } from "../core/registry.js";
 import { downloadSession } from "../core/session-download.js";
-import { listCloudSessions, listSessions, readHeader, uploadSession } from "../core/session.js";
+import { collectSessionLineage, listCloudSessions, listSessions, readHeader, uploadSession } from "../core/session.js";
 import { createExtraRoutes } from "./routes-extra.js";
 import { getService } from "./services.js";
 import { buildCloudView, buildTree } from "./views.js";
@@ -153,9 +153,16 @@ export function createRoutes(ctx) {
 			if (!lfsReady && num(result.large) > 0) lines.push(`⚠ git-lfs 不可用，${result.large} 个大文件只记录清单`);
 			lines.push(`项目 ${result.projectName}：文件 ${num(result.files)}，变更 ${num(result.changed)} / 增 ${num(result.added)} / 删 ${num(result.removed)}${num(result.large) ? `，大文件 ${result.large}` : ""}`);
 
-			const parentSessions = new Set();
-			const localById = new Map(listSessions().map((item) => [item.id, item]));
-			for (const id of ids) {
+			// 上传血缘保护：选中子会话时自动带上本机存在的父会话链，避免云端缺少主对话
+			const lineage = collectSessionLineage(ids);
+			const uploadIds = lineage.ids;
+			if (lineage.added.length) lines.push(`已自动包含父会话：${lineage.added.join(", ")}`);
+			if (lineage.missingParents.length) {
+				lines.push(
+					`⚠ 父会话不在本机，无法自动上传（云端将缺少主对话）：${lineage.missingParents.map((item) => `${item.id}→${item.parentSession}`).join(", ")}`,
+				);
+			}
+			for (const id of uploadIds) {
 				try {
 					const uploaded = await uploadSession({
 						repoRoot: repo.path,
@@ -164,18 +171,13 @@ export function createRoutes(ctx) {
 						projectName: result.projectName,
 						scope: result.scope || "",
 					});
-					lines.push(uploaded.ok ? `✓ 会话 ${id}` : `✗ 会话 ${id}: ${uploaded.error}`);
-					const local = localById.get(id);
-					if (local && local.isSubagent) parentSessions.add(local.parentSession || "(未知父会话)");
+					lines.push(uploaded.ok ? `✓ 会话 ${id}${lineage.added.includes(id) ? "（父会话）" : ""}` : `✗ 会话 ${id}: ${uploaded.error}`);
 				} catch (error) {
 					lines.push(`✗ 会话 ${id}: ${error.message}`);
 				}
 			}
-			if (parentSessions.size) {
-				lines.push(`⚠ 其中有子会话（origin=subagent）：DSH 侧边栏默认只显示普通会话，建议同时在设备上上传父会话 ${[...parentSessions].join(", ")}`);
-			}
 
-			const commit = await commitAndPush(repo.path, `archive: 上传工作区与 ${ids.length} 个会话`);
+			const commit = await commitAndPush(repo.path, `archive: 上传工作区与 ${uploadIds.length} 个会话`);
 			if (commit.error) lines.push(`⚠ 提交/推送失败：${commit.error}`);
 			else if (commit.output) lines.push(commit.output);
 
@@ -229,10 +231,30 @@ export function createRoutes(ctx) {
 				);
 			}
 
+			// 下载血缘保护：选中子会话时自动带上云端存在的父会话链，恢复完整主对话
+			const cloudMap = new Map(listCloudSessions(repo.path).map((session) => [session.id, session]));
+			const downloadIds = (() => {
+				const out = [];
+				const seen = new Set();
+				const add = (id) => {
+					const session = cloudMap.get(id);
+					if (!session) return;
+					if (session.parentSession && cloudMap.has(session.parentSession) && !seen.has(session.parentSession)) add(session.parentSession);
+					if (!seen.has(id)) {
+						seen.add(id);
+						out.push(id);
+					}
+				};
+				ids.forEach(add);
+				return out;
+			})();
+			const autoParents = downloadIds.filter((id) => !ids.includes(id));
+			if (autoParents.length) lines.push(`已自动包含父会话：${autoParents.join(", ")}`);
+
 			const downloaded = [];
 			const subagentParents = new Set();
 			let converted = 0;
-			for (const id of ids) {
+			for (const id of downloadIds) {
 				try {
 					const result = await downloadSession(repo.path, id, {
 						targetCwd: targetDir,

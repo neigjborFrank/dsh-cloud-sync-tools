@@ -172,6 +172,41 @@ function readCloudSessionHeader(dir, meta) {
 	}
 }
 
+/**
+ * 展开会话血缘：把本机存在的父会话（祖先链）一起返回，确保主对话不会被漏传。
+ * @returns {{ids:string[], added:string[], missingParents:Array<{id:string,parentSession:string}>}}
+ */
+export function collectSessionLineage(ids = [], home = dshHome()) {
+	const map = new Map(listSessions(home).map((session) => [session.id, session]));
+	const ordered = [];
+	const seen = new Set();
+	const added = [];
+	const missingParents = [];
+	for (const id of ids) {
+		const chain = [];
+		let cursor = id;
+		let depth = 0;
+		while (cursor && depth < 32 && !chain.includes(cursor)) {
+			const session = map.get(cursor);
+			if (!session) break;
+			chain.unshift(cursor);
+			cursor = session.parentSession || "";
+			depth++;
+		}
+		for (const member of chain) {
+			if (seen.has(member)) continue;
+			seen.add(member);
+			ordered.push(member);
+			if (member !== id) added.push(member);
+		}
+		const session = map.get(id);
+		if (session && session.parentSession && !map.has(session.parentSession)) {
+			missingParents.push({ id, parentSession: session.parentSession });
+		}
+	}
+	return { ids: ordered.length ? ordered : [...ids], added, missingParents };
+}
+
 /** 列出云端会话（扫描 index 项目 sessions/，兼容 v1） */
 export function listCloudSessions(repoRoot) {
 	const out = [];

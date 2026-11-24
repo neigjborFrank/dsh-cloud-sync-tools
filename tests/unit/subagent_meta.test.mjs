@@ -146,6 +146,47 @@ test("downloadSession 父会话存在时保留子会话血缘", async () => {
 	assert.equal(header.parentSession, parentId);
 });
 
+test("collectSessionLineage 自动展开父会话链", () => {
+	const parentId = "session-lineage-parent";
+	const childId = "session-lineage-child";
+	writeSession(parentId, { type: "session", version: 4, id: parentId, cwd, createdAt: 1, isSeeded: false });
+	writeSession(childId, {
+		type: "session",
+		version: 4,
+		id: childId,
+		cwd,
+		createdAt: 2,
+		isSeeded: false,
+		origin: "subagent",
+		parentSession: parentId,
+		delegationDepth: 1,
+	});
+	const lineage = sessionModule.collectSessionLineage([childId], home);
+	assert.deepEqual(lineage.ids, [parentId, childId], "父会话应排在子会话之前");
+	assert.deepEqual(lineage.added, [parentId]);
+	assert.equal(lineage.missingParents.length, 0);
+});
+
+test("collectSessionLineage 报告本机缺失的父会话", () => {
+	const orphanId = "session-lineage-orphan";
+	writeSession(orphanId, {
+		type: "session",
+		version: 4,
+		id: orphanId,
+		cwd,
+		createdAt: 3,
+		isSeeded: false,
+		origin: "subagent",
+		parentSession: "session-nowhere",
+		delegationDepth: 1,
+	});
+	const lineage = sessionModule.collectSessionLineage([orphanId], home);
+	assert.deepEqual(lineage.ids, [orphanId]);
+	assert.equal(lineage.added.length, 0);
+	assert.equal(lineage.missingParents.length, 1);
+	assert.equal(lineage.missingParents[0].parentSession, "session-nowhere");
+});
+
 test.after(() => {
 	fs.rmSync(tempRoot, { recursive: true, force: true });
 });
