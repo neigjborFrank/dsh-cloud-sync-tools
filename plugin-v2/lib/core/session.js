@@ -7,6 +7,7 @@ import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
 
 import { ensureDir, hashBuffer, readJson, timestamp, writeJsonAtomic } from "../shared.js";
 import { layoutDir, projectDir, projectKeyOf, projectName, samePath } from "./layout.js";
+import { readSessionLogInfo } from "./session-cache.js";
 import { ensureProject, listProjects, saveProjectMeta } from "./project.js";
 
 const SESSION_FILE = /^session(\.[A-Za-z0-9]+)*\.jsonl\.zstd$/;
@@ -205,86 +206,6 @@ export function listCloudSessions(repoRoot) {
 	return out;
 }
 
-/** 读取会话日志：header、最后一个事件 seq、事件数（多帧解压） */
-export function readSessionLogInfo(file) {
-	try {
-		const buf = fs.readFileSync(file);
-		let start = 0;
-		let header = null;
-		let lastSeq = -1;
-		let eventCount = 0;
-		let title = "";
-		while (start < buf.length) {
-			const at = buf.indexOf(MAGIC, start);
-			if (at < 0) break;
-			const next = buf.indexOf(MAGIC, at + 4);
-			const end = next < 0 ? buf.length : next;
-			let text;
-			try {
-				text = zstdDecompressSync(buf.subarray(at, end)).toString("utf8");
-			} catch {
-				break;
-			}
-			for (const line of text.split("\n")) {
-				if (!line.trim()) continue;
-				try {
-					const event = JSON.parse(line);
-					if (!header && event.type === "session") header = event;
-					else {
-						eventCount++;
-						if (typeof event.seq === "number" && event.seq > lastSeq) lastSeq = event.seq;
-						if (event.type === "session/title") {
-							const value = event.data && (event.data.title || event.data.val);
-							if (typeof value === "string" && value.trim()) title = value.trim();
-						}
-					}
-				} catch {}
-			}
-			start = end;
-		}
-		return { header, lastSeq: lastSeq >= 0 ? lastSeq : 0, eventCount, title };
-	} catch {
-		return null;
-	}
-}
-
-/**
- * 写 DSH 侧边栏标题/列表投影缓存（session_projcache，version 7）。
- * 关键：DSH 只接受 identity（formatVersion/createdAt/cwd/isSeeded）与会话头**完全匹配**的记录，
- * 否则标题显示"未命名"，直到打开会话后 DSH 重建缓存。因此 identity 必须取自会话头而非当前时间。
- */
-export function writeProjCache(sessionId, options = {}) {
-	try {
-		const home = options.home || dshHome();
-		const header = options.header || {};
-		const cwd = options.cwd || header.cwd || "";
-		const title = options.title || "";
-		const lastSeq = Number.isFinite(options.lastSeq) ? Number(options.lastSeq) : 0;
-		const file = path.join(home, "storages", "session_projcache", "sessions", `${sessionId}.json`);
-		const payload = {
-			version: 7,
-			record: {
-				identity: {
-					formatVersion: Number(header.version || 4),
-					createdAt: Number(header.createdAt || 0),
-					cwd,
-					isSeeded: Boolean(header.isSeeded),
-					inheritedEventCount: Number(header.inheritedEventCount || 0),
-				},
-				rows: {
-					title: title ? { ver: 1, seq: lastSeq, val: title } : undefined,
-					sessionListMetadata: { ver: 1, seq: lastSeq, val: { blank: false, lastPromptAt: null } },
-				},
-			},
-		};
-		writeJsonAtomic(file, payload);
-	} catch {}
-}
-
-/**
- * 上传一个会话到指定项目。
- * @param {{repoRoot:string,id:string,cwd?:string,projectName?:string,scope?:string,home?:string}} options
- */
 export async function uploadSession({ repoRoot, id, cwd, projectName: projectOverride, scope = "", home = dshHome() }) {
 	const dir = cwd ? findSessionDirForCwd(id, cwd, home) : findSessionDir(id, home);
 	if (!dir) return { id, ok: false, error: "本机找不到该会话" };

@@ -6,7 +6,8 @@ import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
 
 import { ensureDir, timestamp } from "../shared.js";
 import { projectKeyOf } from "./layout.js";
-import { dshHome, findSessionFile, listCloudSessions, readHeader, readSessionLogInfo, writeProjCache } from "./session.js";
+import { readSessionLogInfo, writeProjCache } from "./session-cache.js";
+import { dshHome, findSessionFile, listCloudSessions, readHeader } from "./session.js";
 import { projectDir } from "./layout.js";
 
 const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
