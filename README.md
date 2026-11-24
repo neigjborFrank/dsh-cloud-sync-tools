@@ -45,7 +45,9 @@ git clone https://github.com/neigjborFrank/dsh-cloud-sync-tools.git C:\Users\<�
 
 **下载位置**：默认下载到 `%USERPROFILE%\Documents\deepseek-harness\workspaces\<项目名>`，目录不存在时自动创建；下载对话框点「选择文件夹…」会弹出 Windows 标准的"浏览文件夹"窗口，也可留空直接使用默认目录。
 
-> **子会话（origin=subagent）**：DSH 侧边栏默认只显示普通会话；云端若只有子会话（父会话未上传），下载后工作区可见但会话不会出现在侧边栏。插件会在云端视图标记「子会话」并提示父会话 ID。
+> **子会话（origin=subagent）**：DSH 侧边栏默认只显示普通会话。上传子会话时插件会**自动带上本机存在的父会话链**（下载同理带云端父会话链）；父会话确实不存在时，孤儿子会话下载会**自动转为普通会话**（保留 `.bak` 备份），避免“工作区可见但无会话”。
+
+> **侧边栏标题**：下载后会写入 `session_projcache`（identity 严格取自会话头），刷新后标题直接显示，无需先打开一次。
 
 > **工作区登记**：下载/登记工作区走 DSH 官方 `workspaceRegistry`，并对该目录下的会话执行 `attachSession` 挂载；侧边栏显示"工作区下无会话"时通常是登记未完成，重新下载或点「登记工作区」即可。
 
@@ -80,12 +82,12 @@ index/projects/<项目>/           # 清单、会话、映射关系（不含文�
 # 质量门禁（8 项：文件规模/依赖方向/前端接口/版本一致/入口契约）
 node tools/v2/check.mjs
 
-# 单元测试（18 项）
+# 单元测试（26 项，含会话血缘/子会话/标题缓存回归）
 node --test tests/unit/core.test.mjs
 node --test tests/unit/session_repo.test.mjs
 node --test tests/unit/client_static.test.mjs
 
-# 集成测试（41 项，使用真实 git 仓库与 bare 远端；不会碰真实 DSH 数据；含 CORS 预检、多设备拉取、默认目录、目录选择、会话迁移清理、自动同步、云端行会话归行回归）
+# 集成测试（41 项，使用真实 git 仓库与 bare 远端；不会碰真实 DSH 数据；含 CORS 预检、多设备拉取、默认目录、目录选择、会话迁移清理、自动同步、云端行会话归行、工作区会话挂载回归）
 node tests/integration/api.test.mjs <仓库根>/plugin-v2 <临时目录> 8910
 
 # 全新环境端到端（14 项：私有仓库地址配置 → 上传 → 新设备克隆下载）
